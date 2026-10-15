@@ -1,0 +1,43 @@
+[gd_scene format=3 uid="uid://dxe5b6c5nom7w"]
+
+[ext_resource type="PackedScene" uid="uid://bn7fewawvsfyy" path="res://scenes/levels/CityMap.tscn" id="1_tsias"]
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_uisbw"]
+size = Vector2(100, 100)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_uisbw"]
+size = Vector3(100, 0.2, 100)
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_4g0tu"]
+sky_top_color = Color(0.14509805, 0.16862746, 0.21960784, 1)
+sky_horizon_color = Color(0.46666667, 0.44313726, 0.41568628, 1)
+ground_bottom_color = Color(0.14509805, 0.14509805, 0.14509805, 1)
+ground_horizon_color = Color(0.31764707, 0.3019608, 0.28235295, 1)
+
+[sub_resource type="Sky" id="Sky_3exs6"]
+sky_material = SubResource("ProceduralSkyMaterial_4g0tu")
+
+[sub_resource type="Environment" id="Environment_8iafo"]
+background_mode = 2
+sky = SubResource("Sky_3exs6")
+
+[node name="World" type="Node3D" unique_id=1364933436]
+
+[node name="Ground" type="StaticBody3D" parent="." unique_id=873924131]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Ground" unique_id=1732714887]
+mesh = SubResource("PlaneMesh_uisbw")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Ground" unique_id=1121174168]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
+shape = SubResource("BoxShape3D_uisbw")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=2012085169]
+environment = SubResource("Environment_8iafo")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1839693955]
+light_color = Color(0.76862746, 0.78431374, 0.8156863, 1)
+light_energy = 0.6
+shadow_enabled = true
+
+[node name="CityMap" parent="." unique_id=1940595771 instance=ExtResource("1_tsias")]

@@ -1,0 +1,43 @@
+[gd_scene format=3 uid="uid://dipg2iwy83wc6"]
+
+[ext_resource type="Material" uid="uid://bofmxgmjtmq4q" path="res://resources/materials/concrete.tres" id="1_oih6f"]
+[ext_resource type="PackedScene" uid="uid://bjtef5soawwdk" path="res://scenes/props/window.tscn" id="1_tkqxu"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_uisbw"]
+size = Vector3(8, 12, 8)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_8iafo"]
+albedo_color = Color(0.34117648, 0.3254902, 0.30588236, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_uisbw"]
+size = Vector3(8, 12, 8)
+
+[node name="Building" type="StaticBody3D" unique_id=1929447589]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=2095274298]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 6, 0)
+material_overlay = ExtResource("1_oih6f")
+mesh = SubResource("BoxMesh_uisbw")
+surface_material_override/0 = SubResource("StandardMaterial3D_8iafo")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1034248847]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 6, 0)
+shape = SubResource("BoxShape3D_uisbw")
+
+[node name="Window" parent="." unique_id=1092387805 instance=ExtResource("1_tkqxu")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 9, 4.06)
+
+[node name="Window4" parent="." unique_id=30933043 instance=ExtResource("1_tkqxu")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 5, 4.06)
+
+[node name="Window2" parent="." unique_id=1484373151 instance=ExtResource("1_tkqxu")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 4.06)
+
+[node name="Window5" parent="." unique_id=1200002901 instance=ExtResource("1_tkqxu")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9, 4.06)
+
+[node name="Window3" parent="." unique_id=701387130 instance=ExtResource("1_tkqxu")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 9, 4.06)
+
+[node name="Window6" parent="." unique_id=468647640 instance=ExtResource("1_tkqxu")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 5, 4.06)

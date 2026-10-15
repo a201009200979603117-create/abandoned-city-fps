@@ -1,0 +1,24 @@
+[gd_scene format=3 uid="uid://vp76r7g3o77x"]
+
+[ext_resource type="Script" uid="uid://7s048asoejgw" path="res://scripts/player/player_controller.gd" id="1_8afob"]
+[ext_resource type="PackedScene" uid="uid://drejgnmdjasv7" path="res://scenes/weapons/Weapon.tscn" id="2_dovo2"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_x7p2l"]
+radius = 0.35
+height = 1.8
+
+[node name="Player" type="CharacterBody3D" unique_id=19922882 groups=["player"]]
+script = ExtResource("1_8afob")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=178709484]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("CapsuleShape3D_x7p2l")
+
+[node name="Head" type="Node3D" parent="." unique_id=240575328]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
+
+[node name="Camera3D" type="Camera3D" parent="Head" unique_id=83358044]
+current = true
+
+[node name="Weapon" parent="Head/Camera3D" unique_id=239152887 instance=ExtResource("2_dovo2")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, -0.255, -0.5)
