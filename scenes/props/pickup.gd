@@ -36,6 +36,7 @@ func update_pickup_color() -> void:
 		mesh_instance.material_override = material
 
 var player_in_range: Node3D = null
+var lifetime: float = 45.0
 @onready var pickup_hint: Label = get_node("/root/Main/UI/PickupHint")
 
 func _on_body_entered(body: Node3D) -> void:
@@ -56,11 +57,20 @@ func _on_body_exited(body: Node3D) -> void:
 
 func _process(delta: float) -> void:
 	float_time += delta
+	lifetime -= delta
+	if lifetime <= 0.0:
+		queue_free()
+		return
 	rotate_y(3.5 * delta)
 	global_position.y = maxf(start_y, 0.8) + sin(float_time * 3.0) * 0.3
 
 	if player_in_range != null and Input.is_action_just_pressed("interact"):
 		collect_pickup()
+
+
+func _exit_tree() -> void:
+	if player_in_range != null and pickup_hint != null:
+		pickup_hint.visible = false
 
 
 func collect_pickup() -> void:
@@ -69,6 +79,7 @@ func collect_pickup() -> void:
 
 	var body = player_in_range
 	pickup_hint.visible = false
+	Sfx.play("pickup")
 
 	if pickup_type == PickupType.AMMO:
 		var weapon = body.get_node_or_null("Head/Camera3D/Weapon")

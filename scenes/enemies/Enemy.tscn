@@ -1,5 +1,7 @@
 [gd_scene format=3 uid="uid://rcd85kpdoq77"]
 
+[ext_resource type="Script" uid="uid://oycb22tmyba1" path="res://scripts/enemies/enemy_ai.gd" id="1_ai"]
+
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_uisbw"]
 radius = 0.4
 height = 1.8
@@ -12,6 +14,7 @@ height = 1.8
 albedo_color = Color(0.21960784, 0.2, 0.2, 1)
 
 [node name="Enemy" type="CharacterBody3D" unique_id=665307224]
+script = ExtResource("1_ai")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1839427645]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
