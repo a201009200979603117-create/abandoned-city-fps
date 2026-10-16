@@ -65,6 +65,19 @@ var tracer_material: StandardMaterial3D
 var hole_texture: GradientTexture2D
 var holes: Array = []
 var crosshair: Control
+var tracer_pool: Array = []       # [MeshInstance3D, 剩餘時間]
+var tracer_idx: int = 0
+var spark_pool: Array = []
+var spark_idx: int = 0
+var hole_pool: Array = []
+var hole_idx: int = 0
+var shared_box: BoxMesh
+var hole_mesh: QuadMesh
+var hole_mat: StandardMaterial3D
+var spark_mesh: SphereMesh
+const TRACER_POOL: int = 8
+const SPARK_POOL: int = 6
+const HOLE_POOL: int = 40
 
 @onready var ammo_label: Label = get_node_or_null("/root/Main/UI/AmmoLabel")
 @onready var weapon_label: Label = get_node_or_null("/root/Main/UI/WeaponLabel")
@@ -97,6 +110,8 @@ func _ready() -> void:
 	hole_texture.gradient = g
 	hole_texture.width = 32
 	hole_texture.height = 32
+
+	_make_effect_pools()
 
 	flash_light = OmniLight3D.new()
 	flash_light.light_color = Color(1.0, 0.8, 0.4)
@@ -251,6 +266,7 @@ func _process(delta: float) -> void:
 			flash_quad.visible = false
 	_update_pose(delta)
 	_update_recoil_recovery(delta)
+	_update_tracers(delta)
 
 	fire_timer = maxf(fire_timer - delta, 0.0)
 
@@ -442,53 +458,70 @@ func shoot() -> void:
 		Sfx.play("hit", -8.0)
 
 
+# 特效物件池：節點與資源只建立一次，之後重複使用（不會隨射擊不斷配置/釋放記憶體）
+func _make_effect_pools() -> void:
+	shared_box = BoxMesh.new()
+	shared_box.size = Vector3.ONE
+	hole_mesh = QuadMesh.new()
+	hole_mesh.size = Vector2(0.16, 0.16)
+	hole_mat = StandardMaterial3D.new()
+	hole_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	hole_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	hole_mat.albedo_texture = hole_texture
+	hole_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	spark_mesh = SphereMesh.new()
+	spark_mesh.radius = 0.025
+	spark_mesh.height = 0.05
+	spark_mesh.radial_segments = 4
+	spark_mesh.rings = 2
+
+
+func _pooled_node(pool: Array, idx: int, limit: int, make: Callable) -> Node3D:
+	if pool.size() < limit:
+		var n: Node3D = make.call()
+		n.top_level = true
+		add_child(n)
+		pool.append(n)
+		return n
+	return pool[idx % limit]
+
+
 func _spawn_spark(pos: Vector3) -> void:
-	var burst := CPUParticles3D.new()
-	burst.emitting = true
-	burst.one_shot = true
-	burst.explosiveness = 1.0
-	burst.amount = 6
-	burst.lifetime = 0.45
-	burst.direction = Vector3.UP
-	burst.spread = 70.0
-	burst.initial_velocity_min = 1.0
-	burst.initial_velocity_max = 3.5
-	burst.gravity = Vector3(0.0, -9.0, 0.0)
-	var m := SphereMesh.new()
-	m.radius = 0.025
-	m.height = 0.05
-	m.radial_segments = 4
-	m.rings = 2
-	burst.mesh = m
-	burst.material_override = spark_material
-	burst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	get_tree().current_scene.add_child(burst)
+	var burst: CPUParticles3D = _pooled_node(spark_pool, spark_idx, SPARK_POOL, func() -> Node3D:
+		var p := CPUParticles3D.new()
+		p.emitting = false
+		p.one_shot = true
+		p.explosiveness = 1.0
+		p.amount = 6
+		p.lifetime = 0.45
+		p.direction = Vector3.UP
+		p.spread = 70.0
+		p.initial_velocity_min = 1.0
+		p.initial_velocity_max = 3.5
+		p.gravity = Vector3(0.0, -9.0, 0.0)
+		p.mesh = spark_mesh
+		p.material_override = spark_material
+		p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		return p)
+	spark_idx += 1
 	burst.global_position = pos
-	get_tree().create_timer(0.7).timeout.connect(burst.queue_free)
+	burst.restart()
+	burst.emitting = true
 
 
 func _spawn_hole(pos: Vector3, normal: Vector3) -> void:
-	var q := MeshInstance3D.new()
-	var quad := QuadMesh.new()
-	quad.size = Vector2(0.16, 0.16)
-	q.mesh = quad
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_texture = hole_texture
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	q.material_override = mat
-	q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	get_tree().current_scene.add_child(q)
+	var q: MeshInstance3D = _pooled_node(hole_pool, hole_idx, HOLE_POOL, func() -> Node3D:
+		var m := MeshInstance3D.new()
+		m.mesh = hole_mesh
+		m.material_override = hole_mat
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		return m)
+	hole_idx += 1
 	q.global_position = pos + normal * 0.012
 	var up := Vector3.UP if absf(normal.y) < 0.95 else Vector3.RIGHT
 	q.look_at(pos + normal, up)
 	q.rotate_object_local(Vector3.FORWARD, randf() * TAU)
-	holes.append(q)
-	if holes.size() > 40:
-		var old: Node = holes.pop_front()
-		if is_instance_valid(old):
-			old.queue_free()
+	q.visible = true
 
 
 func _spawn_tracer(to: Vector3) -> void:
@@ -496,18 +529,35 @@ func _spawn_tracer(to: Vector3) -> void:
 	var dist := from.distance_to(to)
 	if dist < 1.0:
 		return
-	var t := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = Vector3(0.012, 0.012, dist)
-	t.mesh = box
-	t.material_override = tracer_material
-	t.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	get_tree().current_scene.add_child(t)
-	t.global_position = (from + to) * 0.5
-	t.look_at(to, Vector3.UP if absf((to - from).normalized().y) < 0.99 else Vector3.RIGHT)
-	var tw := t.create_tween()
-	tw.tween_property(t, "scale", Vector3(0.0, 0.0, 1.0), 0.07)
-	tw.tween_callback(t.queue_free)
+	var entry_node: MeshInstance3D = _pooled_node(tracer_pool, tracer_idx, TRACER_POOL, func() -> Node3D:
+		var m := MeshInstance3D.new()
+		m.mesh = shared_box
+		m.material_override = tracer_material
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		m.visible = false
+		return m)
+	tracer_idx += 1
+	entry_node.set_meta("ttl", 0.07)
+	entry_node.scale = Vector3.ONE
+	entry_node.global_position = (from + to) * 0.5
+	entry_node.look_at(to, Vector3.UP if absf((to - from).normalized().y) < 0.99 else Vector3.RIGHT)
+	entry_node.scale = Vector3(0.012, 0.012, dist)
+	entry_node.visible = true
+
+
+func _update_tracers(delta: float) -> void:
+	for t in tracer_pool:
+		var n := t as MeshInstance3D
+		if not n.visible:
+			continue
+		var ttl: float = float(n.get_meta("ttl")) - delta
+		n.set_meta("ttl", ttl)
+		if ttl <= 0.0:
+			n.visible = false
+		else:
+			var k := ttl / 0.07
+			n.scale.x = 0.012 * k
+			n.scale.y = 0.012 * k
 
 
 func start_reload() -> void:

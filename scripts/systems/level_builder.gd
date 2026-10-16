@@ -5,7 +5,7 @@ extends Node3D
 const HALF: float = 100.0
 const ROAD_AXES: Array[float] = [-50.0, 0.0, 50.0]
 const ROAD_WIDTH: float = 12.0
-const LIGHT_POOL_SIZE: int = 6
+const LIGHT_POOL_SIZE: int = 4
 const LIGHT_ENERGY: float = 1.6
 const GROUND_SHADER: Shader = preload("res://shaders/ground.gdshader")
 const BUILDING_SHADER: Shader = preload("res://shaders/building.gdshader")
@@ -25,6 +25,8 @@ var assign_timer: float = 0.0
 
 
 var theme: Dictionary = {}
+var low_spec: bool = false   # 網頁/手機：關閉陰影與泛光、減少粒子與動態光源
+var unit_box: BoxMesh        # 小型道具共用的 1×1×1 方塊（以縮放取得尺寸）
 var skip_chance: float = 0.28
 
 
@@ -37,6 +39,9 @@ func _ready() -> void:
 		theme = Game.level_cfg["theme"]
 		rng.seed = int(Game.level_cfg["seed"])
 		skip_chance = float(Game.level_cfg["skip"])
+	low_spec = Save.touch_mode or OS.has_feature("web")
+	unit_box = BoxMesh.new()
+	unit_box.size = Vector3.ONE
 	building_material = ShaderMaterial.new()
 	building_material.shader = BUILDING_SHADER
 	_setup_environment()
@@ -80,7 +85,7 @@ func _setup_environment() -> void:
 		env.fog_height_density = 0.05
 		env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 		env.tonemap_exposure = 1.05
-		env.glow_enabled = true
+		env.glow_enabled = not low_spec
 		env.glow_intensity = 0.6
 		env.glow_bloom = 0.05
 		env.adjustment_enabled = true
@@ -102,11 +107,15 @@ func _setup_environment() -> void:
 		sun.light_color = theme["sun"]
 		sun.rotation_degrees = Vector3(-50.0, 30.0, 0.0)
 		sun.directional_shadow_max_distance = 70.0
-		if Save.touch_mode:
-			sun.shadow_enabled = false   # 手機效能考量
+		if low_spec:
+			sun.shadow_enabled = false   # 手機/網頁效能考量
 	var cam := get_parent().get_node_or_null("Player/Head/Camera3D") as Camera3D
 	if cam != null:
-		cam.far = 180.0
+		cam.far = 130.0   # 濃霧之外不需要繪製，縮短遠裁切面
+	if Save.touch_mode and not OS.has_feature("web"):
+		# 手機：以 75% 解析度繪製再用 FSR 放大，大幅降低填充率負擔
+		get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR
+		get_viewport().scaling_3d_scale = 0.75
 	_setup_ash()
 
 
@@ -116,9 +125,9 @@ func _setup_ash() -> void:
 	if host == null:
 		return
 	var ash := CPUParticles3D.new()
-	ash.amount = 90 if Save.touch_mode else 220
-	ash.lifetime = 9.0
-	ash.preprocess = 9.0
+	ash.amount = 40 if low_spec else 110
+	ash.lifetime = 8.0
+	ash.preprocess = 4.0
 	ash.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
 	ash.emission_box_extents = Vector3(22.0, 6.0, 22.0)
 	ash.position = Vector3(0.0, 6.0, 0.0)
@@ -271,7 +280,7 @@ func _fill_block(rx: Vector2, rz: Vector2) -> void:
 			footprints.append(Rect2(cx - w * 0.5, cz - d * 0.5, w, d))
 			if ruined:
 				_add_broken_top(Vector3(cx, h, cz), w, d)
-			if rng.randf() < 0.7:
+			if rng.randf() < 0.55:
 				_add_rubble(Vector3(cx, 0.0, cz), w, d)
 
 
@@ -313,7 +322,7 @@ func _add_rubble(center: Vector3, w: float, d: float) -> void:
 		_make_material(Color(0.19, 0.18, 0.17)),
 		_make_material(Color(0.3, 0.14, 0.1)),
 	]
-	for k in rng.randi_range(3, 7):
+	for k in rng.randi_range(2, 4):
 		var side := rng.randi() % 4
 		var off_x := rng.randf_range(-w * 0.5, w * 0.5)
 		var off_z := rng.randf_range(-d * 0.5, d * 0.5)
@@ -337,9 +346,17 @@ func _add_box(pos: Vector3, size: Vector3, mat: Material, yaw: float = 0.0) -> S
 	body.position = pos
 	body.rotation.y = yaw
 	var mesh_instance := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = size
-	mesh_instance.mesh = box
+	if mat == building_material:
+		var box := BoxMesh.new()
+		box.size = size
+		mesh_instance.mesh = box
+	else:
+		# 小型道具：共用單一網格，以縮放取得尺寸，並在遠處自動隱藏
+		mesh_instance.mesh = unit_box
+		mesh_instance.scale = size
+		mesh_instance.visibility_range_end = 85.0
+		mesh_instance.visibility_range_end_margin = 10.0
+		mesh_instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
 	mesh_instance.material_override = mat
 	body.add_child(mesh_instance)
 	var shape := CollisionShape3D.new()
@@ -471,11 +488,14 @@ func _build_drums() -> void:
 			fire.light_color = Color(1.0, 0.55, 0.2)
 			fire.light_energy = 1.4
 			fire.omni_range = 9.0
+			fire.distance_fade_enabled = true
+			fire.distance_fade_begin = 28.0
+			fire.distance_fade_length = 8.0
 			fire.position = Vector3(0.0, 1.0, 0.0)
 			body.add_child(fire)
 			fires.append(fire)
 			var flames := CPUParticles3D.new()
-			flames.amount = 14
+			flames.amount = 6 if low_spec else 10
 			flames.lifetime = 0.9
 			flames.direction = Vector3.UP
 			flames.spread = 12.0
@@ -529,6 +549,9 @@ func _build_street_lights() -> void:
 		light.light_color = Color(1.0, 0.72, 0.42)
 		light.light_energy = LIGHT_ENERGY
 		light.omni_range = 13.0
+		light.distance_fade_enabled = true
+		light.distance_fade_begin = 30.0
+		light.distance_fade_length = 8.0
 		add_child(light)
 		pool.append(light)
 		pool_lamp.append(-1)

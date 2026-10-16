@@ -56,6 +56,7 @@ var walk_phase: float = 0.0
 var anim_seed: float = 0.0
 var attack_anim: float = 0.0
 var lean: float = 0.0
+var anim_acc: float = 0.0
 
 
 # 生成前呼叫：依類型與波次決定能力
@@ -373,7 +374,16 @@ func _physics_process(delta: float) -> void:
 		knock = knock.move_toward(Vector3.ZERO, 40.0 * delta)
 
 	move_and_slide()
-	_animate(delta)
+	# 動畫 LOD：遠處敵人降低動畫更新頻率，極遠時直接隱藏模型
+	var d2 := 0.0
+	if player != null and is_instance_valid(player):
+		d2 = global_position.distance_squared_to(player.global_position)
+	anim_acc += delta
+	if d2 < 900.0 or (Engine.get_physics_frames() + get_instance_id()) % 3 == 0:
+		_animate(anim_acc)
+		anim_acc = 0.0
+	if visual != null:
+		visual.visible = d2 < 8100.0
 
 	# 卡牆時短暫繞行
 	if is_on_wall() and side_timer <= 0.0:

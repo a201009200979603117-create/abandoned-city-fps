@@ -70,6 +70,8 @@ func _rebuild() -> void:
 
 
 func _process(delta: float) -> void:
+	if not is_visible_in_tree():
+		return
 	t += delta
 	for e in embers:
 		e[0] += sin(t * 0.8 + e[4]) * 8.0 * delta

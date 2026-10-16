@@ -20,7 +20,7 @@ float vnoise(vec2 p) {
 float fbm(vec2 p) {
 	float v = 0.0;
 	float a = 0.5;
-	for (int i = 0; i < 4; i++) {
+	for (int i = 0; i < 3; i++) {
 		v += a * vnoise(p);
 		p = p * 2.07 + vec2(11.0, 5.0);
 		a *= 0.5;
@@ -35,6 +35,7 @@ void vertex() {
 void fragment() {
 	vec2 p = v_world.xz;
 	vec3 col = base_color;
+	bool near = length(VERTEX) < 45.0;   // 距離 LOD
 
 	float big = fbm(p * 0.09);
 	col *= 0.55 + big * 0.9;
@@ -46,13 +47,18 @@ void fragment() {
 	col = mix(col, vec3(0.13, 0.1, 0.075), dirt * 0.65);
 
 	// 雜草與苔蘚從裂縫與邊緣冒出
-	float weeds = smoothstep(0.6, 0.82, fbm(p * 0.45 + 90.0));
-	col = mix(col, vec3(0.11, 0.15, 0.06), weeds * (0.35 + 0.35 * asphalt));
+	if (near) {
+		float weeds = smoothstep(0.6, 0.82, fbm(p * 0.45 + 90.0));
+		col = mix(col, vec3(0.11, 0.15, 0.06), weeds * (0.35 + 0.35 * asphalt));
+	}
 
 	// 龜裂：兩層網狀細線
 	float c1 = abs(vnoise(p * 0.55) - 0.5);
-	float c2 = abs(vnoise(p * 1.4 + 7.0) - 0.5);
-	float crack = (1.0 - smoothstep(0.0, 0.018, c1)) + (1.0 - smoothstep(0.0, 0.012, c2)) * 0.7;
+	float crack = 1.0 - smoothstep(0.0, 0.018, c1);
+	if (near) {
+		float c2 = abs(vnoise(p * 1.4 + 7.0) - 0.5);
+		crack += (1.0 - smoothstep(0.0, 0.012, c2)) * 0.7;
+	}
 	col *= 1.0 - clamp(crack, 0.0, 1.0) * (0.55 + 0.25 * asphalt);
 
 	// 積水坑

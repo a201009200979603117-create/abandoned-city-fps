@@ -23,15 +23,35 @@ func _ready() -> void:
 	sounds["ambient"] = _make_ambient(4.0)
 
 
+const MAX_VOICES: int = 4   # 同一種音效最多同時發聲數，播放器會重複使用（避免連射時不斷建立/釋放節點）
+var voices: Dictionary = {}
+var voice_next: Dictionary = {}
+
+
 func play(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
 	if not sounds.has(sound_name):
 		return
-	var p := AudioStreamPlayer.new()
-	p.stream = sounds[sound_name]
+	var pool: Array = voices.get(sound_name, [])
+	if not voices.has(sound_name):
+		voices[sound_name] = pool
+		voice_next[sound_name] = 0
+	var p: AudioStreamPlayer = null
+	for v in pool:
+		if not (v as AudioStreamPlayer).playing:
+			p = v
+			break
+	if p == null:
+		if pool.size() < MAX_VOICES:
+			p = AudioStreamPlayer.new()
+			p.stream = sounds[sound_name]
+			add_child(p)
+			pool.append(p)
+		else:
+			var i: int = voice_next[sound_name]
+			voice_next[sound_name] = (i + 1) % pool.size()
+			p = pool[i]
 	p.volume_db = volume_db
 	p.pitch_scale = pitch
-	add_child(p)
-	p.finished.connect(p.queue_free)
 	p.play()
 
 

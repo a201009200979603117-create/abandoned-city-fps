@@ -43,6 +43,8 @@ void fragment() {
 	vec3 col = tint;
 	float emit = 0.0;
 	float rough = 0.95;
+	// 距離 LOD：遠處（反正被霧遮住）省略昂貴的細節運算
+	bool near = length(VERTEX) < 55.0;
 
 	if (abs(v_normal.y) < 0.5) {
 		float u = abs(v_normal.x) > 0.5 ? v_world.z : v_world.x;
@@ -56,8 +58,8 @@ void fragment() {
 		col *= 0.92 + fine * 0.14;
 
 		// 灰泥剝落，露出紅磚
-		float peel = fbm(uv * 0.55 + 31.0);
-		if (peel > 0.62) {
+		float peel = near ? fbm(uv * 0.55 + 31.0) : 0.0;
+		if (near && peel > 0.62) {
 			vec2 b = vec2(u / 0.42 + floor(y / 0.14) * 0.5, y / 0.14);
 			vec2 bf = fract(b);
 			float mortar = (bf.x < 0.06 || bf.y < 0.1) ? 1.0 : 0.0;
@@ -121,19 +123,23 @@ void fragment() {
 		}
 
 		// 爆炸/火災留下的大片燻黑
-		float soot = smoothstep(0.55, 0.8, fbm(uv * 0.22 + 70.0));
+		float soot = smoothstep(0.55, 0.8, vnoise(uv * 0.22 + 70.0));
 		col = mix(col, col * 0.28, soot * 0.85);
 
 		// 地面附近：泥污與苔蘚
 		float ground = 1.0 - smoothstep(0.0, 2.6, y);
 		col = mix(col, vec3(0.1, 0.09, 0.07), ground * (0.35 + 0.4 * vnoise(uv * 2.0)));
-		float moss = ground * smoothstep(0.55, 0.8, fbm(uv * 1.3 + 5.0));
-		col = mix(col, vec3(0.1, 0.17, 0.07), moss * 0.55);
+		if (near) {
+			float moss = ground * smoothstep(0.55, 0.8, fbm(uv * 1.3 + 5.0));
+			col = mix(col, vec3(0.1, 0.17, 0.07), moss * 0.55);
+		}
 
 		// 裂縫
-		float crack_n = vnoise(vec2(u * 0.8 + sin(y * 0.9) * 0.6, y * 0.18) + seed * 3.0);
-		float crack = 1.0 - smoothstep(0.0, 0.025, abs(crack_n - 0.5));
-		col *= 1.0 - crack * 0.7;
+		if (near) {
+			float crack_n = vnoise(vec2(u * 0.8 + sin(y * 0.9) * 0.6, y * 0.18) + seed * 3.0);
+			float crack = 1.0 - smoothstep(0.0, 0.025, abs(crack_n - 0.5));
+			col *= 1.0 - crack * 0.7;
+		}
 
 		// 鏽水
 		float rust = smoothstep(0.7, 0.9, vnoise(vec2(u * 2.2, y * 0.12) + seed * 5.0));
