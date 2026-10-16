@@ -7,9 +7,9 @@ const PICKUP_SCENE: PackedScene = preload("res://scenes/props/Pickup.tscn")
 @export var spawn_interval: float = 1.2
 @export var first_wave_delay: float = 3.0
 @export var wave_break: float = 5.0
-@export var min_spawn_distance: float = 20.0
-@export var max_spawn_distance: float = 32.0
-@export var arena_half_size: float = 44.0
+@export var min_spawn_distance: float = 22.0
+@export var max_spawn_distance: float = 38.0
+@export var arena_half_size: float = 94.0
 
 var wave_active: bool = false
 var to_spawn: int = 0
@@ -19,6 +19,9 @@ var break_timer: float = 3.0
 
 
 func _ready() -> void:
+	if Game.is_br():
+		set_physics_process(false)   # 大逃殺模式沒有殭屍
+		return
 	break_timer = first_wave_delay
 
 
@@ -46,13 +49,13 @@ func _physics_process(delta: float) -> void:
 
 
 func _max_alive() -> int:
-	return mini(6 + 2 * Game.wave, 14)
+	return mini(6 + 2 * Game.wave + Game.level / 2, 18)
 
 
 func start_wave() -> void:
 	Game.wave += 1
 	wave_active = true
-	to_spawn = 5 + 3 * (Game.wave - 1)
+	to_spawn = int(round(float(5 + 3 * (Game.wave - 1)) * float(Game.level_cfg["count_mult"])))
 	spawned_in_wave = 0
 	spawn_timer = 0.0
 	Sfx.play("wave")
@@ -61,6 +64,8 @@ func start_wave() -> void:
 
 func end_wave() -> void:
 	wave_active = false
+	Game.score += 100 * Game.wave
+	Save.save()
 	Game.wave_cleared.emit(Game.wave)
 	if Game.wave >= Game.total_waves:
 		Game.win()
@@ -73,10 +78,14 @@ func _pick_type() -> int:
 	# 最後一波以坦克型開場
 	if Game.wave >= Game.total_waves and spawned_in_wave == 0:
 		return 2
-	var r := randf()
-	if Game.wave >= 3 and r < 0.15:
+	var tw: Array = Game.level_cfg["type_weights"]
+	var w_normal: float = tw[0]
+	var w_runner: float = tw[1] if Game.wave >= 2 else 0.0
+	var w_tank: float = tw[2] if Game.wave >= 3 else 0.0
+	var r := randf() * (w_normal + w_runner + w_tank)
+	if r < w_tank:
 		return 2
-	if Game.wave >= 2 and r < 0.40:
+	if r < w_tank + w_runner:
 		return 1
 	return 0
 
@@ -84,6 +93,8 @@ func _pick_type() -> int:
 func spawn_enemy() -> void:
 	var enemy := ENEMY_SCENE.instantiate()
 	enemy.setup(_pick_type(), Game.wave)
+	enemy.max_health *= float(Game.level_cfg["hp_mult"])
+	enemy.move_speed *= float(Game.level_cfg["speed_mult"])
 	enemy.position = _find_spawn_position()
 	get_tree().current_scene.add_child(enemy)
 	spawned_in_wave += 1

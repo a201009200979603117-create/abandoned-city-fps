@@ -87,8 +87,7 @@ func collect_pickup() -> void:
 		if weapon == null:
 			return
 
-		weapon.reserve_ammo += ammo_amount
-		weapon.update_ammo_ui()
+		weapon.add_reserve(ammo_amount)
 		print("拾取彈藥！備用子彈：", weapon.reserve_ammo)
 
 	elif pickup_type == PickupType.HEALTH:

@@ -17,6 +17,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+Save="*res://autoload/save.gd"
 Game="*res://autoload/game.gd"
 Sfx="*res://autoload/sfx.gd"
 
@@ -24,6 +25,7 @@ Sfx="*res://autoload/sfx.gd"
 
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+window/handheld/orientation=4
 
 [input]
 
@@ -71,3 +73,4 @@ interact={
 
 rendering_device/driver.windows="d3d12"
 renderer/rendering_method="mobile"
+textures/vram_compression/import_etc2_astc=true

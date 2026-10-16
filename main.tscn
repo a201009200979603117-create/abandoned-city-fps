@@ -3,8 +3,10 @@
 [ext_resource type="PackedScene" uid="uid://dxe5b6c5nom7w" path="res://scenes/levels/world.tscn" id="1_0xm2m"]
 [ext_resource type="PackedScene" uid="uid://vp76r7g3o77x" path="res://scenes/player/player.tscn" id="2_h2yge"]
 [ext_resource type="Script" uid="uid://bgsmpg8h7ye38" path="res://scripts/systems/enemy_spawner.gd" id="5_lquwl"]
-[ext_resource type="Script" path="res://scripts/systems/level_builder.gd" id="6_level"]
-[ext_resource type="Script" path="res://ui/hud.gd" id="7_hud"]
+[ext_resource type="Script" uid="uid://q5e0o06h7ju5" path="res://scripts/systems/level_builder.gd" id="6_level"]
+[ext_resource type="Script" uid="uid://dq564hdvah4ft" path="res://ui/hud.gd" id="7_hud"]
+[ext_resource type="Script" uid="uid://cimiq5sw28hsx" path="res://scripts/systems/skills.gd" id="8_skills"]
+[ext_resource type="Script" uid="uid://d1e4kngsgg7r2" path="res://scripts/br/br_manager.gd" id="9_br"]
 
 [node name="Main" type="Node3D" unique_id=325323686]
 
@@ -65,3 +67,9 @@ script = ExtResource("5_lquwl")
 
 [node name="LevelBuilder" type="Node3D" parent="." unique_id=876797241]
 script = ExtResource("6_level")
+
+[node name="Skills" type="Node" parent="." unique_id=1773660084]
+script = ExtResource("8_skills")
+
+[node name="BR" type="Node3D" parent="." unique_id=689798466]
+script = ExtResource("9_br")
