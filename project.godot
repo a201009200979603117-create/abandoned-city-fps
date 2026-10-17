@@ -24,6 +24,10 @@ Save="*res://autoload/save.gd"
 Game="*res://autoload/game.gd"
 Sfx="*res://autoload/sfx.gd"
 
+[audio]
+
+driver/output_latency.web=150
+
 [display]
 
 window/stretch/mode="canvas_items"

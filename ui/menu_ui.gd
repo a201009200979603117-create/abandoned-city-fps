@@ -56,6 +56,8 @@ func _ready() -> void:
 	page_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(page_root)
 	show_page("main")
+	if OS.has_feature("web") and not Game.audio_unlocked:
+		_add_unlock_overlay()
 
 
 func _process(delta: float) -> void:
@@ -80,6 +82,37 @@ func _notification(what: int) -> void:
 			quit_requested.emit()
 		else:
 			_back()
+
+
+# 網頁版：瀏覽器規定要使用者互動後才能播放音訊，先請玩家點一下畫面
+func _add_unlock_overlay() -> void:
+	var ov := Control.new()
+	ov.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	ov.mouse_filter = Control.MOUSE_FILTER_STOP
+	var bg := ColorRect.new()
+	bg.color = Color(0.02, 0.01, 0.03, 0.62)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ov.add_child(bg)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ov.add_child(center)
+	var box := VBoxContainer.new()
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	center.add_child(box)
+	var t := _label("點擊畫面開始", 56, Color(0.98, 0.85, 0.6), HORIZONTAL_ALIGNMENT_CENTER)
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(t)
+	var sub := _label("（啟用音效與音樂）", 24, Color(0.85, 0.85, 0.9), HORIZONTAL_ALIGNMENT_CENTER)
+	sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(sub)
+	ov.gui_input.connect(func(e: InputEvent) -> void:
+		if (e is InputEventMouseButton and e.pressed) or (e is InputEventScreenTouch and e.pressed) or (e is InputEventKey and e.pressed):
+			Game.audio_unlocked = true
+			ov.queue_free()
+			Sfx.restart_music())
+	add_child(ov)
 
 
 func open_main(to_lobby: bool = false) -> void:
@@ -380,7 +413,14 @@ func _page_main() -> void:
 
 # ---------- 3D 預覽 ----------
 
-func _make_preview(weapon_id: String, skin_id: String, px: Vector2) -> SubViewportContainer:
+func _make_preview(weapon_id: String, skin_id: String, px: Vector2) -> Control:
+	# 低畫質（網頁預設）不建立 3D 預覽：第一次使用 3D 管線會編譯著色器而卡住數秒，改用 2D 槍枝圖示
+	if Save.effective_quality() == 0:
+		var holder := CenterContainer.new()
+		holder.custom_minimum_size = px
+		var icon_col: Color = WeaponDB.skin_color(skin_id).lightened(0.35)
+		holder.add_child(IconRect.make("gun", icon_col, minf(px.x, px.y) * 0.62))
+		return holder
 	var c := SubViewportContainer.new()
 	c.stretch = true
 	c.custom_minimum_size = px

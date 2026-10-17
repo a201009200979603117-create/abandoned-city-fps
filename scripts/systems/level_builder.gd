@@ -9,6 +9,8 @@ const LIGHT_POOL_SIZE: int = 4
 const LIGHT_ENERGY: float = 1.6
 const GROUND_SHADER: Shader = preload("res://shaders/ground.gdshader")
 const BUILDING_SHADER: Shader = preload("res://shaders/building.gdshader")
+const GROUND_LITE: Shader = preload("res://shaders/ground_lite.gdshader")
+const BUILDING_LITE: Shader = preload("res://shaders/building_lite.gdshader")
 const LevelDB = preload("res://scripts/data/level_db.gd")
 
 var rng := RandomNumberGenerator.new()
@@ -45,6 +47,12 @@ var last_yield_ms: int = 0
 
 
 func _ready() -> void:
+	# 渲染解析度：低畫質在遊戲中以 1152×648 內部解析度繪製再放大（網頁 / 低階 GPU 的填充率是最大瓶頸）；選單維持清晰
+	var win := get_tree().root
+	if Game.gameplay_boot and Save.effective_quality() == 0:
+		win.content_scale_mode = Window.CONTENT_SCALE_MODE_VIEWPORT
+	else:
+		win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
 	# 主選單啟動時不需要城市場景（開始遊戲會重新載入場景）：跳過建構，省下約 2000 個節點與數百 MB 顯存
 	if not Game.gameplay_boot:
 		return
@@ -62,7 +70,8 @@ func _ready() -> void:
 	unit_box = BoxMesh.new()
 	unit_box.size = Vector3.ONE
 	building_material = ShaderMaterial.new()
-	building_material.shader = BUILDING_SHADER
+	# 低畫質（含手機 / 網頁預設）改用輕量著色器：像素著色器是這類裝置最大的 GPU 負擔
+	building_material.shader = BUILDING_LITE if low_spec else BUILDING_SHADER
 	_setup_environment()
 	_setup_ground()
 	_build_roads()
@@ -188,7 +197,7 @@ func _setup_environment() -> void:
 	if cam != null:
 		cam.far = cam_far_override if cam_far_override > 0.0 else 130.0   # 濃霧之外不需要繪製，縮短遠裁切面
 	# 畫質對應的 3D 繪製解析度（低於 1.0 時以雙線性放大，降低填充率負擔）
-	var res_scale: float = [0.65, 0.8, 1.0][quality_level]
+	var res_scale: float = [1.0, 0.8, 1.0][quality_level]   # 低畫質已改用視窗縮放（見 _ready），避免重複縮小
 	if res_scale < 1.0:
 		get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 		get_viewport().scaling_3d_scale = res_scale
@@ -253,7 +262,7 @@ func _setup_ash() -> void:
 
 func _ground_material(color: Color, asphalt: float) -> ShaderMaterial:
 	var sm := ShaderMaterial.new()
-	sm.shader = GROUND_SHADER
+	sm.shader = GROUND_LITE if low_spec else GROUND_SHADER
 	sm.set_shader_parameter("base_color", color)
 	sm.set_shader_parameter("asphalt", asphalt)
 	return sm

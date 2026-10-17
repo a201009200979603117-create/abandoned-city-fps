@@ -372,6 +372,14 @@ func thunder(delay: float = 0.6) -> void:
 	play("thunder", -4.0, randf_range(0.85, 1.1))
 
 
+# 網頁版玩家第一次點擊後：從頭重新播放大廳音樂（確保在音訊解鎖之後才開始）
+func restart_music() -> void:
+	if music_player != null and music_wanted and music_stream != null:
+		music_player.stop()
+		_set_music(true)
+	play("ui_click", -4.0)
+
+
 func _set_music(on: bool) -> void:
 	music_wanted = on
 	if music_player == null:

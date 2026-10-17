@@ -30,6 +30,7 @@ var wave: int = 0
 var total_waves: int = 5
 var enemies_remaining: int = 0
 var skip_menu: bool = false
+var audio_unlocked: bool = false   # 網頁版：玩家是否已點擊過畫面（瀏覽器要求互動後才能出聲）
 var gameplay_boot: bool = false     # 目前這次場景載入是「開始遊戲」（需要建構關卡）；回到主選單時為 false
 var level_ready: bool = false       # 關卡是否已建構完成
 var load_progress: float = 0.0      # 載入進度 0~1（載入畫面用）

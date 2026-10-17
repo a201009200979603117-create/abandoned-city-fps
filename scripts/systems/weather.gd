@@ -173,6 +173,10 @@ func _add_headlamp() -> void:
 	var cam := get_parent().get_parent().get_node_or_null("Player/Head/Camera3D") as Camera3D
 	if cam == null:
 		return
+	if quality == 0:
+		# 低畫質不用聚光燈（相容性渲染器上很吃效能）：改為稍微提高環境光，維持可視度
+		env.ambient_light_energy *= 1.3
+		return
 	var lamp := SpotLight3D.new()
 	lamp.light_color = Color(1.0, 0.95, 0.85)
 	lamp.light_energy = 4.0 if quality >= 1 else 3.0
