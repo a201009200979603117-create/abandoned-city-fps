@@ -49,6 +49,8 @@ var br_node: Node = null
 var banner_tween: Tween
 var toast_box: VBoxContainer
 var dmg_indicator: Control
+var loading_root: Control
+var loading_bar: ProgressBar
 var shield_bar: ProgressBar
 var item_label: Label
 var boss_box: VBoxContainer
@@ -111,10 +113,67 @@ func _ready() -> void:
 
 	if Game.skip_menu:
 		Game.skip_menu = false
-		_begin_run()
+		_start_after_load()
 	else:
 		_on_state_changed(Game.State.MENU)
 		Game.show_lobby = false
+
+
+# 等關卡分幀建構完成才開局；期間顯示載入畫面（網頁 / 手機上避免看起來像當機）
+func _start_after_load() -> void:
+	if Game.gameplay_boot and not Game.level_ready:
+		_show_loading()
+		while not Game.level_ready:
+			loading_bar.value = Game.load_progress
+			await get_tree().process_frame
+		loading_bar.value = 1.0
+		await get_tree().process_frame
+		loading_root.queue_free()
+		loading_root = null
+	_begin_run()
+
+
+func _show_loading() -> void:
+	if menu_ui != null:
+		menu_ui.visible = false
+	get_viewport().disable_3d = false   # 讓 3D 在載入畫面後面先渲染，著色器 / 管線提前編譯
+	loading_root = Control.new()
+	loading_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	loading_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(loading_root)
+	var bg := ColorRect.new()
+	bg.color = Color(0.03, 0.02, 0.04, 1.0)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	loading_root.add_child(bg)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	loading_root.add_child(center)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 16)
+	center.add_child(box)
+	var title := Label.new()
+	title.text = "載入關卡中…"
+	_style(title, 40, Color(0.95, 0.82, 0.58))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(title)
+	loading_bar = ProgressBar.new()
+	loading_bar.show_percentage = false
+	loading_bar.max_value = 1.0
+	loading_bar.custom_minimum_size = Vector2(420.0, 14.0)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Color(0.78, 0.34, 0.2)
+	fill.set_corner_radius_all(6)
+	var back := StyleBoxFlat.new()
+	back.bg_color = Color(0.1, 0.08, 0.1)
+	back.set_corner_radius_all(6)
+	loading_bar.add_theme_stylebox_override("fill", fill)
+	loading_bar.add_theme_stylebox_override("background", back)
+	box.add_child(loading_bar)
+	var tip := Label.new()
+	tip.text = "首次載入需要編譯著色器，請稍候"
+	_style(tip, 18, Color(0.7, 0.7, 0.76))
+	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(tip)
 
 
 func _notification(what: int) -> void:

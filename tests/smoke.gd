@@ -33,6 +33,7 @@ func _start_main() -> void:
 	save = root.get_node("Save")
 	game.mode = mode
 	game._apply_level(level)
+	game.gameplay_boot = true
 	game.skip_menu = true   # 與正式流程一致：HUD 就緒時直接開局，關卡 / 大逃殺管理才會真的建構
 	main = load("res://main.tscn").instantiate()
 	root.add_child(main)

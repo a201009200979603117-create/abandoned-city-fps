@@ -13,6 +13,7 @@ func _process(_delta: float) -> bool:
 		var game := root.get_node("Game")
 		game.mode = "zombie"
 		game._apply_level(1)
+		game.gameplay_boot = true
 		game.skip_menu = true
 		main = load("res://main.tscn").instantiate()
 		root.add_child(main)

@@ -41,9 +41,12 @@ var unit_box: BoxMesh        # 小型道具共用的 1×1×1 方塊（以縮放�
 var skip_chance: float = 0.28
 
 
+var last_yield_ms: int = 0
+
+
 func _ready() -> void:
 	# 主選單啟動時不需要城市場景（開始遊戲會重新載入場景）：跳過建構，省下約 2000 個節點與數百 MB 顯存
-	if Game.state == Game.State.MENU:
+	if not Game.gameplay_boot:
 		return
 	if Game.is_br():
 		theme = LevelDB.BR_THEME
@@ -63,15 +66,41 @@ func _ready() -> void:
 	_setup_environment()
 	_setup_ground()
 	_build_roads()
-	_build_buildings()
-	_build_props()
+	_load_async()   # 其餘建構分幀進行（不 await：讓載入畫面能持續更新）
+
+
+# 分幀建構：每幀最多做約 12 毫秒的工作，網頁 / 手機上畫面不會凍結，並顯示載入進度
+func _yield_slice(progress: float = -1.0) -> void:
+	if progress >= 0.0:
+		Game.load_progress = progress
+	if Time.get_ticks_msec() - last_yield_ms > 12:
+		await get_tree().process_frame
+		last_yield_ms = Time.get_ticks_msec()
+
+
+func _load_async() -> void:
+	last_yield_ms = Time.get_ticks_msec()
+	await get_tree().process_frame
+	await _build_buildings()
+	Game.load_progress = 0.65
+	await _build_props()
+	Game.load_progress = 0.82
+	await _yield_slice()
 	_build_drums()
 	_build_hazards()
+	await _yield_slice(0.88)
 	_build_street_lights()
 	_build_boundary()
+	await _yield_slice(0.95)
 	player = get_tree().get_first_node_in_group("player") as Node3D
 	_assign_lights()
 	Sfx.start_ambient()
+	# 多等兩幀：著色器與管線在載入畫面後面先編譯，進入遊戲時不會再卡一下
+	await get_tree().process_frame
+	await get_tree().process_frame
+	Game.load_progress = 1.0
+	Game.level_ready = true
+	Game.level_loaded.emit()
 
 
 func _process(delta: float) -> void:
@@ -323,9 +352,13 @@ func _block_ranges() -> Array[Vector2]:
 
 func _build_buildings() -> void:
 	var ranges := _block_ranges()
+	var total := float(maxi(ranges.size() * ranges.size(), 1))
+	var n := 0
 	for rx in ranges:
 		for rz in ranges:
 			_fill_block(rx, rz)
+			n += 1
+			await _yield_slice(0.05 + 0.6 * float(n) / total)
 
 
 func _fill_block(rx: Vector2, rz: Vector2) -> void:
@@ -461,6 +494,8 @@ func _on_road(x: float, z: float, margin: float) -> bool:
 func _build_props() -> void:
 	# 車輛殘骸（沿道路）
 	for i in 36:
+		if i % 6 == 0:
+			await _yield_slice()
 		var axis: float = ROAD_AXES[rng.randi() % ROAD_AXES.size()]
 		var along := rng.randf_range(-HALF + 4.0, HALF - 4.0)
 		var across := axis + rng.randf_range(-3.5, 3.5)
@@ -496,6 +531,8 @@ func _build_props() -> void:
 
 	# 水泥路障
 	for i in 40:
+		if i % 8 == 0:
+			await _yield_slice()
 		var axis: float = ROAD_AXES[rng.randi() % ROAD_AXES.size()]
 		var along := rng.randf_range(-HALF + 4.0, HALF - 4.0)
 		var across := axis + rng.randf_range(-5.0, 5.0)
@@ -509,6 +546,8 @@ func _build_props() -> void:
 	var tries := 0
 	while placed < 90 and tries < 800:
 		tries += 1
+		if tries % 16 == 0:
+			await _yield_slice()
 		var x := rng.randf_range(-HALF + 3.0, HALF - 3.0)
 		var z := rng.randf_range(-HALF + 3.0, HALF - 3.0)
 		if _in_footprint(x, z, 1.5) or _on_road(x, z, 1.0):

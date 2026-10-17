@@ -1,15 +1,55 @@
 extends Node
-# 以程式合成的簡易音效（不需要任何音檔）
+# 音效與音樂：全部由程式合成，但「預先烘焙」成 res://audio/*.wav 隨遊戲發佈，執行時直接載入，
+# 避免在手機 / 網頁（單執行緒 WebAssembly）啟動時花數秒到數十秒即時合成而卡死、無聲。
+# 重新烘焙：AC_BAKE=1 godot --path . -s tests/bake_audio.gd（會以合成程式重新產生並覆寫音檔）
 
 const RATE: int = 22050
 const AudioSynth = preload("res://scripts/data/audio_synth.gd")
 
+const BAKED_DIR: String = "res://audio/"
+const BAKED_NAMES: Array = [
+	"shoot", "empty", "reload", "hit", "die", "hurt", "pickup", "wave", "win", "lose", "step", "ambient",
+	"groan1", "groan2", "groan3", "screech", "roar", "heartbeat", "hit_head", "kill_ding", "explosion",
+	"grenade_pin", "far_shot", "ui_click", "ui_hover", "ui_back", "beep", "wave_clear", "siren", "thunder",
+	"rain", "car_alarm", "boss_loop",
+]
+const LOOPING: Array = ["ambient", "rain", "boss_loop", "music_lobby"]
+
 var sounds: Dictionary = {}
 var ambient_player: AudioStreamPlayer
+var baked: bool = false
+
+
+# 載入預先烘焙的音檔；全部存在才算成功（否則退回即時合成，供開發與重新烘焙使用）
+func _try_load_baked() -> bool:
+	if OS.get_environment("AC_BAKE") == "1":
+		return false
+	var names: Array = BAKED_NAMES.duplicate()
+	names.append("music_lobby")
+	for n in names:
+		if not ResourceLoader.exists(BAKED_DIR + str(n) + ".wav"):
+			return false
+	for n in names:
+		var wav := load(BAKED_DIR + str(n) + ".wav") as AudioStreamWAV
+		if wav == null:
+			return false
+		if LOOPING.has(n):
+			wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+			wav.loop_begin = 0
+			wav.loop_end = wav.data.size() / 2
+		if n == "music_lobby":
+			music_stream = wav
+		else:
+			sounds[n] = wav
+	return true
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	baked = _try_load_baked()
+	if baked:
+		_init_audio_extras.call_deferred()
+		return
 	sounds["shoot"] = _synth(0.22, _gen_shoot)
 	sounds["empty"] = _synth(0.06, _gen_empty)
 	sounds["reload"] = _synth(0.6, _gen_reload)
@@ -221,22 +261,22 @@ func _init_audio_extras() -> void:
 	music_player.volume_db = -80.0
 	add_child(music_player)
 
-	sounds["groan1"] = _make_groan(1.9, 118.0, 66.0, 0.22, 520.0, 980.0, 0.5)
-	sounds["groan2"] = _make_groan(1.4, 150.0, 92.0, 0.3, 640.0, 1250.0, 0.55)
-	sounds["groan3"] = _make_groan(2.4, 95.0, 58.0, 0.38, 430.0, 820.0, 0.65)
-	sounds["screech"] = _make_groan(1.1, 360.0, 620.0, 0.35, 950.0, 2100.0, 0.7)
-	sounds["roar"] = _make_groan(2.6, 82.0, 52.0, 0.45, 380.0, 760.0, 0.75)
-	sounds["heartbeat"] = _synth(0.7, _gen_heartbeat)
-	sounds["hit_head"] = _synth(0.16, _gen_hit_head)
-	sounds["kill_ding"] = _synth(0.35, _gen_kill_ding)
-	sounds["explosion"] = _make_explosion()
-	sounds["grenade_pin"] = _synth(0.12, _gen_empty)
-	sounds["far_shot"] = _make_far_shot()
-	# 輕量的介面音效：立即產生
-	sounds["ui_click"] = AudioSynth.ui_click()
-	sounds["ui_hover"] = AudioSynth.ui_hover()
-	sounds["ui_back"] = AudioSynth.ui_back()
-	sounds["beep"] = AudioSynth.beep()
+	if not baked:
+		sounds["groan1"] = _make_groan(1.9, 118.0, 66.0, 0.22, 520.0, 980.0, 0.5)
+		sounds["groan2"] = _make_groan(1.4, 150.0, 92.0, 0.3, 640.0, 1250.0, 0.55)
+		sounds["groan3"] = _make_groan(2.4, 95.0, 58.0, 0.38, 430.0, 820.0, 0.65)
+		sounds["screech"] = _make_groan(1.1, 360.0, 620.0, 0.35, 950.0, 2100.0, 0.7)
+		sounds["roar"] = _make_groan(2.6, 82.0, 52.0, 0.45, 380.0, 760.0, 0.75)
+		sounds["heartbeat"] = _synth(0.7, _gen_heartbeat)
+		sounds["hit_head"] = _synth(0.16, _gen_hit_head)
+		sounds["kill_ding"] = _synth(0.35, _gen_kill_ding)
+		sounds["explosion"] = _make_explosion()
+		sounds["grenade_pin"] = _synth(0.12, _gen_empty)
+		sounds["far_shot"] = _make_far_shot()
+		sounds["ui_click"] = AudioSynth.ui_click()
+		sounds["ui_hover"] = AudioSynth.ui_hover()
+		sounds["ui_back"] = AudioSynth.ui_back()
+		sounds["beep"] = AudioSynth.beep()
 	rain_player = AudioStreamPlayer.new()
 	rain_player.volume_db = -80.0
 	add_child(rain_player)
@@ -249,8 +289,11 @@ func _init_audio_extras() -> void:
 	Game.state_changed.connect(_on_game_state)
 	Game.wave_started.connect(func(_w: int) -> void:
 		play("roar", -4.0, randf_range(0.9, 1.05)))
-	_start_music_build()
+	if not baked:
+		_start_music_build()
 	_on_game_state(Game.state)
+	if baked and rain_wanted > 0.0:
+		start_rain(rain_wanted)
 
 
 func apply_music_volume() -> void:

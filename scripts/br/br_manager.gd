@@ -70,13 +70,16 @@ func _exit_tree() -> void:
 
 
 func _ready() -> void:
-	if not Game.is_br() or Game.state == Game.State.MENU:
+	if not Game.is_br() or not Game.gameplay_boot:
 		set_process(false)
 		return
 	_start_match.call_deferred()
 
 
 func _start_match() -> void:
+	# 等地圖分幀建構完成、且 HUD 已開局（物理恢復運作）
+	while not Game.level_ready or Game.state == Game.State.MENU:
+		await get_tree().process_frame
 	# 等地圖碰撞體註冊進物理空間
 	await get_tree().physics_frame
 	await get_tree().physics_frame
@@ -100,8 +103,9 @@ func _start_match() -> void:
 	for i in 3:
 		spawn_gun(_random_gun(), ground_point(spawn, 4.0, 12.0))
 
-	_spawn_bots(spawn)
-	_spawn_loot()
+	# 分幀生成（每個 AI / 每批道具之間讓出一幀），避免網頁 / 手機在開局瞬間卡住
+	await _spawn_bots(spawn)
+	await _spawn_loot()
 	_build_zone()
 	_begin_hold()
 	started = true
@@ -160,6 +164,7 @@ func _spawn_bots(player_pos: Vector3) -> void:
 		bot.global_position = pos
 		bot.start_drop(randf_range(150.0, 260.0))
 		bots.append(bot)
+		await get_tree().process_frame
 		# 每個 AI 出生點附近放兩把槍
 		for j in 2:
 			spawn_gun(_random_gun(), ground_point(pos, 3.0, 9.0))
@@ -168,12 +173,17 @@ func _spawn_bots(player_pos: Vector3) -> void:
 func _spawn_loot() -> void:
 	for i in 30:
 		spawn_gun(_random_gun(), ground_point(Vector3.ZERO, 0.0, 95.0))
+		if i % 6 == 5:
+			await get_tree().process_frame
 	for i in 14:
 		spawn_item("grenade", ground_point(Vector3.ZERO, 0.0, 95.0))
+	await get_tree().process_frame
 	for i in 15:
 		spawn_item("medkit", ground_point(Vector3.ZERO, 0.0, 95.0))
+	await get_tree().process_frame
 	for i in 16:
 		spawn_item("plate", ground_point(Vector3.ZERO, 0.0, 95.0))
+	await get_tree().process_frame
 	for i in 22:
 		var pk := PICKUP_SCENE.instantiate()
 		pk.set("pickup_type", i % 2)

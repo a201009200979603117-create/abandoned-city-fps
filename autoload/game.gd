@@ -13,6 +13,7 @@ signal hit_marker(killed: bool)
 signal skill_cast(id: String, evolved: bool)
 signal kill_feed(text: String)
 signal banner(text: String)
+signal level_loaded                                                  # 關卡 / 地圖建構完成
 signal toast(title: String, text: String, color: Color)         # 成就 / 任務 / 升級通知
 signal hit_detail(zone: String, killed: bool, damage: float, pos: Vector3)   # 命中部位：head / body / leg
 signal boss_changed(boss: Node)                                  # Boss 出場 / 死亡（HUD 血條）
@@ -29,6 +30,9 @@ var wave: int = 0
 var total_waves: int = 5
 var enemies_remaining: int = 0
 var skip_menu: bool = false
+var gameplay_boot: bool = false     # 目前這次場景載入是「開始遊戲」（需要建構關卡）；回到主選單時為 false
+var level_ready: bool = false       # 關卡是否已建構完成
+var load_progress: float = 0.0      # 載入進度 0~1（載入畫面用）
 var show_lobby: bool = false
 
 # 模式："zombie"（殭屍關卡）或 "br"（大逃殺）
@@ -93,6 +97,9 @@ func begin_run(new_mode: String, new_level: int = 1) -> void:
 	mode = new_mode
 	_apply_level(new_level)
 	skip_menu = true
+	gameplay_boot = true
+	level_ready = false
+	load_progress = 0.0
 	show_lobby = false
 	get_tree().paused = false
 	get_tree().reload_current_scene()
@@ -104,6 +111,8 @@ func restart_run() -> void:
 
 func return_to_lobby() -> void:
 	skip_menu = false
+	gameplay_boot = false
+	level_ready = false
 	show_lobby = true
 	get_tree().paused = false
 	get_tree().reload_current_scene()
