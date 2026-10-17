@@ -5,10 +5,12 @@
 
 ## 立即下載遊玩
 
+**👉 [在 itch.io 下載（推薦）](https://zfy-0920.itch.io/abandoned-city-fps)**　｜　[GitHub Releases](https://github.com/a201009200979603117-create/abandoned-city-fps/releases/latest)
+
 | 平台 | 下載 | 說明 |
 |---|---|---|
-| 🖥️ Windows | [Releases → `AbandonedCityFPS-windows.exe`](https://github.com/a201009200979603117-create/abandoned-city-fps/releases/latest) | 單一執行檔，下載後雙擊即可，不需安裝 |
-| 📱 Android | [Releases → `AbandonedCityFPS-android-debug.apk`](https://github.com/a201009200979603117-create/abandoned-city-fps/releases/latest) | 需允許「安裝未知來源應用程式」（見下方） |
+| 🖥️ Windows | [itch.io](https://zfy-0920.itch.io/abandoned-city-fps) ／ [GitHub Releases → `AbandonedCityFPS-windows.exe`](https://github.com/a201009200979603117-create/abandoned-city-fps/releases/latest) | 單一執行檔，下載後雙擊即可，不需安裝 |
+| 📱 Android | [itch.io](https://zfy-0920.itch.io/abandoned-city-fps) ／ [GitHub Releases → `AbandonedCityFPS-android-debug.apk`](https://github.com/a201009200979603117-create/abandoned-city-fps/releases/latest) | 需允許「安裝未知來源應用程式」（見下方） |
 
 > 本遊戲不提供網頁版（瀏覽器上效能與音訊表現不穩定），請下載上方版本遊玩。想要更流暢請到「設定 → 畫質」調整。
 
@@ -52,7 +54,7 @@
 - Android 返回鍵＝暫停 / 返回上一頁
 
 ## 安裝 APK（Android）
-1. 用手機瀏覽器打開 [Releases](https://github.com/a201009200979603117-create/abandoned-city-fps/releases/latest)，下載 `AbandonedCityFPS-android-debug.apk`
+1. 用手機瀏覽器打開 [itch.io 頁面](https://zfy-0920.itch.io/abandoned-city-fps) 或 [Releases](https://github.com/a201009200979603117-create/abandoned-city-fps/releases/latest)，下載 `AbandonedCityFPS-android-debug.apk`
 2. 開啟下載的檔案；若系統提示，請允許該瀏覽器或檔案管理員「安裝未知來源應用程式」
 3. 安裝後從桌面開啟即可。APK 為 debug 簽章，Play 保護機制可能跳出提示，選擇「仍要安裝」
 
