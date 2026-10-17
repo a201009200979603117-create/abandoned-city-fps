@@ -2,8 +2,12 @@ extends CharacterBody3D
 # 大逃殺 AI 玩家：撿槍、跑安全區、發現敵人後交戰（會瞄準、掃射、換彈）
 
 const WeaponDB = preload("res://scripts/data/weapon_db.gd")
+const GrenadeScript = preload("res://scripts/br/grenade.gd")
+const DeathAnim = preload("res://scripts/systems/death_anim.gd")
 
 const SIGHT_RANGE: float = 55.0
+const FOV_COS: float = 0.5            # 視野半角 60°（總視野 120°）
+const LOSE_SIGHT_TIME: float = 1.5    # 目標離開視野後，最多往最後位置搜索這麼久就放棄
 
 var bot_name: String = "Bot"
 var is_dead: bool = false
@@ -22,6 +26,16 @@ var react_timer: float = 0.0
 var manager: Node = null
 var target: Node3D = null
 var target_visible: bool = false
+var spot_target: Node3D = null    # 正在「察覺中」的對象（尚未鎖定）
+var spot_time: float = 0.0
+var spot_need: float = 0.6
+var lost_time: float = 0.0
+var last_seen_pos: Vector3 = Vector3.ZERO
+var vision_timer: float = 0.0
+var alert_timer: float = 0.0      # 被打到後轉頭查看的時間
+var alert_pos: Vector3 = Vector3.ZERO
+var aim_time: float = 0.0         # 鎖定後瞄準穩定度（越久越準）
+var scan_t: float = 0.0
 var last_attacker: Node = null
 var think_timer: float = 0.0
 var goal: Vector3 = Vector3.ZERO
@@ -34,6 +48,18 @@ var strafe_dir: float = 1.0
 var strafe_timer: float = 1.0
 var flash_t: float = 0.0
 var stuck_timer: float = 0.0
+
+# 道具與戰術
+var grenades: int = 0
+var medkits: int = 0
+var plates: int = 0
+var shield: float = 0.0
+var heal_t: float = 0.0
+var heal_kind: String = ""
+var grenade_cd: float = 4.0
+var flee_t: float = 0.0
+var dropping: bool = false
+var canopy: Node3D = null
 
 # 外觀
 var tint_mats: Array = []
@@ -58,6 +84,8 @@ func _ready() -> void:
 	col.position.y = 0.9
 	add_child(col)
 	think_timer = randf() * 0.3
+	vision_timer = randf() * 0.12
+	scan_t = randf() * TAU
 	_build_visuals()
 	_refresh_weapon_model()
 
@@ -180,15 +208,176 @@ func weapon_value(id: String) -> float:
 func take_damage(damage: float, source: Node = null) -> void:
 	if is_dead:
 		return
-	health -= damage * (1.0 - armor)
+	if dropping:
+		return
+	var remaining := damage * (1.0 - armor)
+	if shield > 0.0:
+		var absorbed := minf(shield, remaining)
+		shield -= absorbed
+		remaining -= absorbed
+	health -= remaining
 	flash_t = 0.12
+	if heal_t > 0.0:
+		heal_t = 0.0   # 受傷打斷治療
 	if source != null and source != self:
 		last_attacker = source
-		if target == null or not is_instance_valid(target):
-			target = source as Node3D
-			react_timer = maxf(react_timer, 0.35 / skill)
+		# 被打到：只會轉頭往來源方向查看，需要在視野中看到對方才會交戰
+		var src := source as Node3D
+		if src != null and (target == null or not is_instance_valid(target)):
+			alert_timer = 3.0
+			alert_pos = src.global_position
 	if health <= 0.0:
 		die()
+
+
+# ---------- 道具 / 跳傘 / 聽覺 ----------
+
+func give_item(kind: String) -> void:
+	match kind:
+		"grenade":
+			grenades = mini(grenades + 1, 4)
+		"medkit":
+			medkits = mini(medkits + 1, 4)
+		"plate":
+			plates = mini(plates + 1, 4)
+
+
+func wants_item(kind: String) -> bool:
+	match kind:
+		"grenade":
+			return grenades < 3
+		"medkit":
+			return medkits < 2
+		"plate":
+			return plates < 2
+	return false
+
+
+# 聽到槍聲 / 爆炸：轉頭查看，有一定機率前往聲音來源（不會直接鎖定目標）
+func hear(pos: Vector3, source: Node) -> void:
+	if is_dead or dropping or heal_t > 0.0 or source == self or target != null:
+		return
+	alert_timer = maxf(alert_timer, 2.5)
+	alert_pos = pos
+	if has_weapon() and randf() < 0.45:
+		goal = pos + Vector3(randf_range(-4.0, 4.0), 0.0, randf_range(-4.0, 4.0))
+		has_goal = true
+
+
+func start_drop(height: float) -> void:
+	dropping = true
+	global_position.y = height
+	canopy = Node3D.new()
+	add_child(canopy)
+	var dome := MeshInstance3D.new()
+	var sph := SphereMesh.new()
+	sph.radius = 1.6
+	sph.height = 1.6
+	sph.is_hemisphere = true
+	dome.mesh = sph
+	var m := StandardMaterial3D.new()
+	m.albedo_color = shirt_color.lightened(0.2)
+	dome.material_override = m
+	dome.position = Vector3(0, 3.0, 0)
+	dome.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	canopy.add_child(dome)
+	for i in 4:
+		var a := float(i) * TAU / 4.0
+		var line := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.02, 2.4, 0.02)
+		line.mesh = bm
+		line.position = Vector3(cos(a) * 0.7, 1.7, sin(a) * 0.7)
+		line.rotation = Vector3(-sin(a) * 0.4, 0.0, cos(a) * 0.4)
+		canopy.add_child(line)
+
+
+func _drop_physics(delta: float) -> void:
+	velocity.x = 0.0
+	velocity.z = 0.0
+	velocity.y = -12.0 if global_position.y > 50.0 else -5.5
+	move_and_slide()
+	if is_on_floor():
+		dropping = false
+		if canopy != null:
+			canopy.queue_free()
+			canopy = null
+		velocity = Vector3.ZERO
+	_animate(delta)
+
+
+func _finish_heal() -> void:
+	if heal_kind == "medkit" and medkits > 0:
+		medkits -= 1
+		health = minf(health + max_health * 0.6, max_health)
+	elif heal_kind == "plate" and plates > 0:
+		plates -= 1
+		shield = minf(shield + 25.0, 50.0)
+	heal_kind = ""
+
+
+# 戰術：殘血且被盯上 → 找掩體撤退；沒被盯上 → 用醫療包 / 護甲板
+func _tactics() -> void:
+	var hp_frac := health / max_health
+	var threatened := target != null and is_instance_valid(target) and target_visible
+	if hp_frac < 0.4 and threatened and flee_t <= 0.0 and (medkits > 0 or randf() < 0.5):
+		var cover := _find_cover((target as Node3D).global_position)
+		if cover != Vector3.INF:
+			goal = cover
+			has_goal = true
+			flee_t = 3.5
+	elif not threatened and heal_t <= 0.0 and flee_t <= 0.0:
+		if medkits > 0 and hp_frac < 0.7:
+			heal_kind = "medkit"
+			heal_t = 3.0
+		elif plates > 0 and shield < 25.0:
+			heal_kind = "plate"
+			heal_t = 1.5
+
+
+# 取樣周圍點：威脅者到該點的視線被擋住就是掩體
+func _find_cover(threat_pos: Vector3) -> Vector3:
+	var space := get_world_3d().direct_space_state
+	var best := Vector3.INF
+	var best_d := INF
+	for i in 12:
+		var a := randf() * TAU
+		var r := randf_range(4.0, 11.0)
+		var p := global_position + Vector3(cos(a) * r, 0.0, sin(a) * r)
+		var gq := PhysicsRayQueryParameters3D.create(Vector3(p.x, 30.0, p.z), Vector3(p.x, -1.0, p.z))
+		var gh := space.intersect_ray(gq)
+		if gh.is_empty() or gh["position"].y > 0.6:
+			continue
+		p.y = gh["position"].y
+		var lq := PhysicsRayQueryParameters3D.create(threat_pos + Vector3(0, 1.4, 0), p + Vector3(0, 1.2, 0))
+		if target is CollisionObject3D:
+			lq.exclude = [(target as CollisionObject3D).get_rid()]
+		if space.intersect_ray(lq).is_empty():
+			continue   # 看得到 → 不是掩體
+		var d := global_position.distance_to(p)
+		if d < best_d:
+			best_d = d
+			best = p
+	return best
+
+
+func _try_grenade(dist: float) -> void:
+	if grenades <= 0 or grenade_cd > 0.0 or react_timer > 0.0 or dist < 8.0 or dist > 30.0 or target == null:
+		return
+	if randf() > 0.03:
+		return
+	grenades -= 1
+	grenade_cd = 8.0
+	var g := Node3D.new()
+	g.set_script(GrenadeScript)
+	get_tree().current_scene.add_child(g)
+	g.global_position = _eye() + Vector3(0, 0.1, 0)
+	var flat := (target as Node3D).global_position - global_position
+	flat.y = 0.0
+	var theta := deg_to_rad(40.0)
+	var v := sqrt(flat.length() * 14.0 / sin(2.0 * theta)) * 1.05
+	g.launch(flat.normalized() * v * cos(theta) + Vector3.UP * v * sin(theta), self)
+	Sfx.play("grenade_pin", -4.0, 0.8)
 
 
 func die() -> void:
@@ -204,10 +393,13 @@ func die() -> void:
 	if manager != null:
 		manager.bot_died(self, last_attacker)
 	Sfx.play("die", -6.0, randf_range(0.8, 1.0))
-	var tw := create_tween()
-	tw.tween_property(self, "rotation:x", -PI / 2.0, 0.35)
-	tw.tween_interval(6.0)
-	tw.tween_callback(queue_free)
+	var away := Vector3.ZERO
+	if last_attacker is Node3D:
+		away = global_position - (last_attacker as Node3D).global_position
+	var parts: Array = []
+	parts.append_array(legs)
+	parts.append_array(arms)
+	DeathAnim.play(self, away, parts, false, 6.0)
 
 
 # ---------- AI ----------
@@ -230,6 +422,29 @@ func _can_see(n: Node3D) -> bool:
 	return not hit.is_empty() and hit["collider"] == n
 
 
+func _view_forward() -> Vector3:
+	var f := -global_transform.basis.z
+	f.y = 0.0
+	f = f.normalized()
+	if target == null:
+		# 巡視時視線左右掃動
+		f = f.rotated(Vector3.UP, sin(scan_t) * 0.6)
+	return f
+
+
+# 目標是否進入視野：距離、視野角、無遮蔽
+func _perceives(n: Node3D) -> bool:
+	var to := n.global_position - global_position
+	to.y = 0.0
+	var d := to.length()
+	var sight := SIGHT_RANGE * (0.7 if n.get("crouching") == true else 1.0)
+	if d > sight:
+		return false
+	if d > 1.5 and _view_forward().dot(to / d) < FOV_COS:
+		return false
+	return _can_see(n)
+
+
 func _find_target() -> Node3D:
 	var best: Node3D = null
 	var best_d := INF
@@ -238,31 +453,66 @@ func _find_target() -> Node3D:
 		if n == null or n == self or bool(n.get("is_dead")):
 			continue
 		var d := global_position.distance_to(n.global_position)
-		var sight := SIGHT_RANGE * (0.7 if n.get("crouching") == true else 1.0)
-		if d > sight or d >= best_d:
+		if d >= best_d or d > SIGHT_RANGE:
 			continue
-		if _can_see(n):
+		if _perceives(n):
 			best = n
 			best_d = d
 	return best
 
 
-func _think() -> void:
-	var prev := target
+func _update_vision(dt: float) -> void:
 	if target != null and (not is_instance_valid(target) or bool(target.get("is_dead"))):
-		target = null
-	var seen := _find_target()
-	if seen != null:
-		if seen != prev:
-			react_timer = randf_range(0.35, 0.8) / skill
-		target = seen
+		_drop_target()
+	if target != null:
+		if _perceives(target):
+			target_visible = true
+			lost_time = 0.0
+			last_seen_pos = target.global_position
+		else:
+			target_visible = false
+			lost_time += dt
+			if lost_time > LOSE_SIGHT_TIME:
+				_drop_target()   # 離開視野一段時間 → 放棄追蹤
+		return
+	var cand := _find_target()
+	if cand == null:
+		spot_target = null
+		spot_time = 0.0
+		return
+	if cand != spot_target:
+		spot_target = cand
+		spot_time = 0.0
+		var dist := global_position.distance_to(cand.global_position)
+		spot_need = randf_range(0.45, 0.9) * (1.0 + dist / SIGHT_RANGE)
+		if cand.get("crouching") == true:
+			spot_need *= 1.4
+		if alert_timer > 0.0:
+			spot_need *= 0.5   # 剛被攻擊，警覺性較高
+		spot_need /= skill
+	spot_time += dt
+	if spot_time >= spot_need:
+		# 反應完成：鎖定目標，再加上舉槍瞄準的延遲才會開火
+		target = cand
 		target_visible = true
-	else:
-		target_visible = false
-		# 目標跟丟：追擊一小段距離
-		if target != null and global_position.distance_to(target.global_position) > SIGHT_RANGE:
-			target = null
+		lost_time = 0.0
+		last_seen_pos = cand.global_position
+		react_timer = randf_range(0.3, 0.6) / skill
+		aim_time = 0.0
+		spot_target = null
+		spot_time = 0.0
 
+
+func _drop_target() -> void:
+	target = null
+	target_visible = false
+	lost_time = 0.0
+	aim_time = 0.0
+	has_goal = false
+
+
+func _think() -> void:
+	_tactics()
 	var zone_c: Vector3 = manager.zone_center
 	var zone_r: float = manager.zone_radius
 	var dz := Vector2(global_position.x - zone_c.x, global_position.z - zone_c.z).length()
@@ -278,7 +528,7 @@ func _think() -> void:
 			has_goal = true
 		elif not has_goal or global_position.distance_to(goal) < 2.0:
 			_pick_roam_goal(zone_c, zone_r)
-	elif target != null:
+	elif target != null and flee_t <= 0.0:
 		has_goal = false
 	elif not has_goal or global_position.distance_to(goal) < 2.5:
 		# 已有槍：順手換更好的槍，否則往安全區中心附近移動
@@ -287,7 +537,16 @@ func _think() -> void:
 			goal = gun2.global_position
 			has_goal = true
 		else:
-			_pick_roam_goal(zone_c, zone_r)
+			var it: Node3D = manager.nearest_item(global_position, 24.0)
+			var sup: Node3D = manager.nearest_supply(global_position, 70.0)
+			if it != null and wants_item(str(it.get_meta("item_kind"))):
+				goal = it.global_position
+				has_goal = true
+			elif sup != null and randf() < 0.6:
+				goal = sup.global_position
+				has_goal = true
+			else:
+				_pick_roam_goal(zone_c, zone_r)
 
 
 func _pick_roam_goal(zone_c: Vector3, zone_r: float) -> void:
@@ -302,6 +561,11 @@ func _physics_process(delta: float) -> void:
 		return
 	if not Game.is_playing():
 		return
+	if dropping:
+		_drop_physics(delta)
+		return
+	grenade_cd = maxf(grenade_cd - delta, 0.0)
+	flee_t = maxf(flee_t - delta, 0.0)
 
 	if flash_t > 0.0:
 		flash_t = maxf(flash_t - delta, 0.0)
@@ -311,6 +575,12 @@ func _physics_process(delta: float) -> void:
 
 	fire_timer = maxf(fire_timer - delta, 0.0)
 	react_timer = maxf(react_timer - delta, 0.0)
+	alert_timer = maxf(alert_timer - delta, 0.0)
+	scan_t += delta * 1.1
+	vision_timer -= delta
+	if vision_timer <= 0.0:
+		vision_timer = 0.12
+		_update_vision(0.12)
 	if reload_left > 0.0:
 		reload_left -= delta
 		if reload_left <= 0.0:
@@ -331,9 +601,18 @@ func _physics_process(delta: float) -> void:
 
 	var move_dir := Vector3.ZERO
 	var speed := move_speed
-	var combat := target != null and is_instance_valid(target) and target_visible and has_weapon()
+	var channeling := heal_t > 0.0
+	if channeling:
+		heal_t -= delta
+		if heal_t <= 0.0:
+			_finish_heal()
+	var combat := target != null and is_instance_valid(target) and target_visible and has_weapon() and not channeling and flee_t <= 0.0
+	if flee_t > 0.0:
+		speed *= 1.3
 
-	if combat:
+	if channeling:
+		pass   # 原地使用道具
+	elif combat:
 		var to_t := target.global_position - global_position
 		to_t.y = 0.0
 		var dist := to_t.length()
@@ -353,7 +632,21 @@ func _physics_process(delta: float) -> void:
 		else:
 			move_dir = side * 0.6
 		speed *= 0.85
+		aim_time += delta
 		_try_shoot(dist)
+		_try_grenade(dist)
+	elif spot_target != null and is_instance_valid(spot_target):
+		# 察覺中：停下腳步轉向可疑對象，還沒決定要不要交戰
+		var to_sp := spot_target.global_position - global_position
+		to_sp.y = 0.0
+		_face(to_sp.normalized(), delta, 7.0)
+		speed *= 0.3
+		move_dir = Vector3.ZERO
+	elif alert_timer > 2.0 and target == null:
+		# 被打到：愣一下、轉向來源
+		var to_al := alert_pos - global_position
+		to_al.y = 0.0
+		_face(to_al.normalized(), delta, 9.0)
 	elif has_goal:
 		var to_g := goal - global_position
 		to_g.y = 0.0
@@ -365,8 +658,8 @@ func _physics_process(delta: float) -> void:
 			if manager != null:
 				manager.bot_try_pickup(self)
 	elif target != null and is_instance_valid(target):
-		# 看不見目標但還記得位置：靠近搜索
-		var to_s := target.global_position - global_position
+		# 目標剛離開視野：只往「最後看到的位置」查看，不會即時追蹤
+		var to_s := last_seen_pos - global_position
 		to_s.y = 0.0
 		if to_s.length() > 3.0:
 			move_dir = to_s.normalized()
@@ -428,9 +721,12 @@ func _try_shoot(dist: float) -> void:
 	if not bool(def["auto"]):
 		fire_timer = maxf(fire_timer, 0.55)
 
+	if manager != null:
+		manager.noise(global_position, 48.0, self)
 	var origin := _eye() + (-global_transform.basis.z) * 0.4
 	var aim := _chest_of(target)
-	var err := deg_to_rad((float(def["spread"]) + 1.2 + dist * 0.07) / skill)
+	var warm := 1.0 + maxf(1.0 - aim_time, 0.0) * 2.5   # 剛鎖定時瞄不準，逐漸穩定
+	var err := deg_to_rad((float(def["spread"]) + 1.2 + dist * 0.07) * warm / skill)
 	var space := get_world_3d().direct_space_state
 	var last_end := origin
 	for i in int(def["pellets"]):

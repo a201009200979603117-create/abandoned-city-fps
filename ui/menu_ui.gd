@@ -6,10 +6,15 @@ const Leaderboard = preload("res://scripts/data/leaderboard.gd")
 const CoverArt = preload("res://ui/cover_art.gd")
 const EquipDB = preload("res://scripts/data/equip_db.gd")
 const LevelDB = preload("res://scripts/data/level_db.gd")
+const UIUtil = preload("res://ui/ui_util.gd")
+const IconRect = preload("res://ui/icon_rect.gd")
+const ProgressDB = preload("res://scripts/data/progress_db.gd")
+const TouchEditor = preload("res://ui/touch_layout_editor.gd")
+const Weather = preload("res://scripts/systems/weather.gd")
 
 const PAGE_PARENT: Dictionary = {
 	"lobby": "main", "weapons": "lobby", "gacha": "lobby", "leaderboard": "lobby",
-	"levels": "lobby", "br": "lobby", "equipment": "lobby",
+	"levels": "lobby", "br": "lobby", "equipment": "lobby", "quests": "lobby", "touch_edit": "settings",
 }
 
 signal start_requested
@@ -34,6 +39,9 @@ var sel_level: int = 1
 var eq_slot: String = "head"
 var lb_mode: String = "zombie"
 var t: float = 0.0
+var mobile: bool:
+	get:
+		return Save.touch_mode
 
 
 func _init() -> void:
@@ -57,11 +65,21 @@ func _process(delta: float) -> void:
 	if is_instance_valid(preview_pivot):
 		preview_pivot.rotate_y(delta * 0.9)
 	if is_instance_valid(coin_label):
-		coin_label.text = "◉ 喪屍幣　%d" % Save.coins
+		var coin_text := "喪屍幣　%d" % Save.coins
+		if coin_label.text != coin_text:
+			coin_label.text = coin_text
 	if is_instance_valid(title_label):
 		# 偶爾閃爍的霓虹招牌
 		var flick := 1.0 if sin(t * 17.0) * sin(t * 5.3) > -0.93 else 0.55
 		title_label.modulate.a = flick
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST and is_visible_in_tree():
+		if current_page == "main" and not pause_mode:
+			quit_requested.emit()
+		else:
+			_back()
 
 
 func open_main(to_lobby: bool = false) -> void:
@@ -109,11 +127,11 @@ func _panel(min_size: Vector2 = Vector2.ZERO, border: Color = Color(0.5, 0.2, 0.
 	return p
 
 
-func _button(text: String, cb: Callable, min_size: Vector2 = Vector2(300, 52), accent: Color = ACCENT, selected: bool = false) -> Button:
+func _button(text: String, cb: Callable, min_size: Vector2 = Vector2(300, 52), accent: Color = ACCENT, selected: bool = false, icon: String = "") -> Button:
 	var b := Button.new()
 	b.text = text
-	b.custom_minimum_size = min_size
-	b.add_theme_font_size_override("font_size", 22)
+	b.custom_minimum_size = Vector2(min_size.x, maxf(min_size.y, 62.0) if mobile else min_size.y)
+	b.add_theme_font_size_override("font_size", 25 if mobile else 22)
 	b.add_theme_color_override("font_color", Color(0.92, 0.9, 0.88))
 	b.add_theme_color_override("font_hover_color", Color.WHITE)
 	b.add_theme_color_override("font_disabled_color", Color(0.45, 0.45, 0.48))
@@ -126,6 +144,23 @@ func _button(text: String, cb: Callable, min_size: Vector2 = Vector2(300, 52), a
 	b.add_theme_stylebox_override("pressed", _box(accent.darkened(0.3), Color.WHITE, 3, 8))
 	b.add_theme_stylebox_override("focus", _box(accent.darkened(0.6), accent.lightened(0.2), 3, 8))
 	b.add_theme_stylebox_override("disabled", _box(Color(0.08, 0.08, 0.1, 0.8), Color(0.2, 0.2, 0.24), 2, 8))
+	if icon != "":
+		# 圖示放在左側，文字留出空間
+		for st in ["normal", "hover", "pressed", "focus", "disabled"]:
+			(b.get_theme_stylebox(st) as StyleBoxFlat).content_margin_left = 54
+		var px := 30.0 if mobile else 26.0
+		var ic := IconRect.make(icon, accent.lightened(0.5), px)
+		ic.set_anchors_preset(Control.PRESET_CENTER_LEFT)
+		ic.offset_left = 16
+		ic.offset_right = 16 + px
+		ic.offset_top = -px * 0.5
+		ic.offset_bottom = px * 0.5
+		b.add_child(ic)
+	b.pressed.connect(func() -> void: Sfx.play("ui_click", -4.0))
+	if not mobile:
+		b.mouse_entered.connect(func() -> void:
+			if not b.disabled:
+				Sfx.play("ui_hover", -10.0))
 	if not cb.is_null():
 		b.pressed.connect(cb)
 	return b
@@ -135,6 +170,7 @@ func _clear_page() -> void:
 	coin_label = null
 	title_label = null
 	preview_pivot = null
+	page_root.modulate.a = 1.0
 	for c in page_root.get_children():
 		c.queue_free()
 
@@ -142,13 +178,38 @@ func _clear_page() -> void:
 func _coin_panel() -> PanelContainer:
 	var p := PanelContainer.new()
 	p.add_theme_stylebox_override("panel", _box(Color(0.06, 0.05, 0.03, 0.9), GOLD.darkened(0.2), 2, 20))
-	coin_label = _label("◉ 喪屍幣　%d" % Save.coins, 24, GOLD)
-	p.add_child(coin_label)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 16)
+	p.add_child(h)
+	# 等級與經驗條
+	var lv := Save.player_level()
+	var base_xp := ProgressDB.xp_at(lv)
+	var next_xp := ProgressDB.xp_at(lv + 1)
+	var lv_box := HBoxContainer.new()
+	lv_box.add_theme_constant_override("separation", 8)
+	h.add_child(lv_box)
+	var star := IconRect.make("star", Color(0.55, 0.8, 1.0), 26)
+	star.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	lv_box.add_child(star)
+	var lv_col := VBoxContainer.new()
+	lv_col.add_theme_constant_override("separation", 0)
+	lv_box.add_child(lv_col)
+	lv_col.add_child(_label("Lv.%d" % lv, 20, Color(0.7, 0.88, 1.0)))
+	var xb := _quest_bar(float(Save.xp - base_xp), float(next_xp - base_xp), Color(0.4, 0.7, 1.0))
+	xb.custom_minimum_size = Vector2(86, 8)
+	lv_col.add_child(xb)
+	var coin_ic := IconRect.make("coin", GOLD, 24)
+	coin_ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	h.add_child(coin_ic)
+	coin_label = _label("喪屍幣　%d" % Save.coins, 24, GOLD)
+	h.add_child(coin_label)
 	return p
 
 
 # 子頁面骨架：標題列（含喪屍幣）+ 內容 + 返回鈕。回傳內容容器
-func _page_frame(title: String) -> VBoxContainer:
+func _page_frame(title: String, scrollable: bool = true) -> VBoxContainer:
+	if mobile:
+		return _mobile_frame(title)
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	margin.add_theme_constant_override("margin_left", 40)
@@ -158,7 +219,7 @@ func _page_frame(title: String) -> VBoxContainer:
 	page_root.add_child(margin)
 
 	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.45)
+	dim.color = Color(0.02, 0.01, 0.02, 0.78) if pause_mode else Color(0, 0, 0, 0.45)
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	page_root.add_child(dim)
@@ -177,9 +238,18 @@ func _page_frame(title: String) -> VBoxContainer:
 		header.add_child(_coin_panel())
 
 	var content := VBoxContainer.new()
-	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_theme_constant_override("separation", 12)
-	root.add_child(content)
+	if scrollable:
+		# 內容超過視窗高度時可捲動
+		var scroll := ScrollContainer.new()
+		scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		root.add_child(scroll)
+		content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		scroll.add_child(content)
+	else:
+		content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		root.add_child(content)
 
 	var footer := HBoxContainer.new()
 	root.add_child(footer)
@@ -203,12 +273,20 @@ func _back() -> void:
 
 func show_page(page: String) -> void:
 	current_page = page
+	if art != null:
+		art.visible = not pause_mode
 	_clear_page()
 	match page:
 		"main":
-			_page_main()
+			if mobile:
+				_page_main_mobile()
+			else:
+				_page_main()
 		"lobby":
-			_page_lobby()
+			if mobile:
+				_page_lobby_mobile()
+			else:
+				_page_lobby()
 		"levels":
 			_page_levels()
 		"br":
@@ -221,6 +299,10 @@ func show_page(page: String) -> void:
 			_page_gacha()
 		"leaderboard":
 			_page_leaderboard()
+		"quests":
+			_page_quests()
+		"touch_edit":
+			_page_touch_edit()
 		"settings":
 			_page_settings()
 
@@ -264,10 +346,11 @@ func _page_main() -> void:
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(spacer)
 
-	var first := _button("▶　開始遊戲", func() -> void: show_page("lobby"), Vector2(330, 58), GOLD)
+	var first := _button("開始遊戲", func() -> void: show_page("lobby"), Vector2(330, 58), GOLD, false, "play")
 	col.add_child(first)
-	col.add_child(_button("設定", _open_settings.bind("main"), Vector2(330, 48), Color(0.6, 0.65, 0.7)))
-	col.add_child(_button("離開", func() -> void: quit_requested.emit(), Vector2(330, 48), Color(0.5, 0.5, 0.55)))
+	col.add_child(_button("設定", _open_settings.bind("main"), Vector2(330, 48), Color(0.6, 0.65, 0.7), false, "gear"))
+	if not OS.has_feature("web"):
+		col.add_child(_button("離開", func() -> void: quit_requested.emit(), Vector2(330, 48), Color(0.5, 0.5, 0.55)))
 
 	var weapon: Dictionary = WeaponDB.WEAPONS[Save.selected_weapon]
 	var skin: Dictionary = WeaponDB.SKINS[Save.selected_skin]
@@ -304,7 +387,7 @@ func _make_preview(weapon_id: String, skin_id: String, px: Vector2) -> SubViewpo
 	var vp := SubViewport.new()
 	vp.own_world_3d = true
 	vp.transparent_bg = true
-	vp.msaa_3d = Viewport.MSAA_2X
+	vp.msaa_3d = Viewport.MSAA_DISABLED if (mobile or Save.effective_quality() == 0) else Viewport.MSAA_2X
 	vp.size = Vector2i(px)
 	c.add_child(vp)
 
@@ -416,6 +499,40 @@ func _page_weapons() -> void:
 	_stat_row(stats, "穩定", 100.0 - float(def["recoil"]) * 800.0 - float(def["spread"]) * 5.0, Color(0.8, 0.5, 1.0))
 	stats.add_child(_label("每秒傷害 %d　彈匣 %d　備彈 %d" % [int(dmg_total * rate), def["mag"], def["reserve"]], 16, Color(0.75, 0.75, 0.8)))
 
+	# 配件改裝
+	dcol.add_child(_label("配件改裝（用喪屍幣升級，每把槍各自獨立）", 18, Color(0.9, 0.85, 0.7)))
+	for kind in ProgressDB.ATTACH_KINDS:
+		var info: Dictionary = ProgressDB.ATTACH[kind]
+		var lv := Save.attach_level(Save.selected_weapon, kind)
+		var arow := HBoxContainer.new()
+		arow.add_theme_constant_override("separation", 10)
+		dcol.add_child(arow)
+		var aic := IconRect.make("wrench", GOLD.lightened(0.2), 24)
+		aic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		arow.add_child(aic)
+		var an := _label(str(info["name"]), 18)
+		an.custom_minimum_size = Vector2(130, 0)
+		arow.add_child(an)
+		var ad := _label(str(info["desc"]), 14, Color(0.72, 0.72, 0.8))
+		ad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		arow.add_child(ad)
+		for p in ProgressDB.ATTACH_MAX:
+			var pip := ColorRect.new()
+			pip.custom_minimum_size = Vector2(18, 8)
+			pip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			pip.color = GOLD if p < lv else Color(0.25, 0.22, 0.24)
+			arow.add_child(pip)
+		var cost := ProgressDB.attach_cost(kind, lv)
+		var abtn: Button
+		if lv >= ProgressDB.ATTACH_MAX:
+			abtn = _button("滿級", Callable(), Vector2(130, 40), Color(0.5, 0.5, 0.55))
+			abtn.disabled = true
+		else:
+			abtn = _button("升級 %d" % cost, _upgrade_attach.bind(kind), Vector2(130, 40), GOLD)
+			abtn.disabled = Save.coins < cost
+		abtn.add_theme_font_size_override("font_size", 17)
+		arow.add_child(abtn)
+
 	dcol.add_child(_label("槍枝皮膚（點選裝備，抽獎可獲得更多）", 18, Color(0.9, 0.85, 0.7)))
 	var grid := GridContainer.new()
 	grid.columns = 5
@@ -432,6 +549,13 @@ func _page_weapons() -> void:
 		sb.add_theme_font_size_override("font_size", 17)
 		sb.disabled = not owned
 		grid.add_child(sb)
+
+
+func _upgrade_attach(kind: String) -> void:
+	if Save.upgrade_attach(Save.selected_weapon, kind):
+		Sfx.play("pickup", 0.0, 1.3)
+		Game.record_max("attach_maxed", Save.attach_maxed_count())
+	show_page("weapons")
 
 
 func _select_weapon(id: String) -> void:
@@ -579,6 +703,7 @@ func _do_draw() -> void:
 	if res.is_empty():
 		busy = false
 		return
+	Game.record_max("skins_owned", Save.owned_skins.size())
 	Sfx.play("wave", -6.0, 1.5)
 
 	# 滾動動畫
@@ -623,6 +748,7 @@ func _page_leaderboard() -> void:
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(0, 400)   # 外層已可捲動，內層需要固定高度
 	col.add_child(scroll)
 	var rows := VBoxContainer.new()
 	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -683,70 +809,265 @@ func _lb_row(rank: String, who: String, wave: String, score: String, color: Colo
 
 # ---------- 設定 ----------
 
+func _circle_tex(r: int, color: Color, ring: Color) -> ImageTexture:
+	var d := r * 2
+	var img := Image.create(d, d, false, Image.FORMAT_RGBA8)
+	for y in d:
+		for x in d:
+			var dist := Vector2(x + 0.5 - r, y + 0.5 - r).length()
+			if dist <= r - 1.0:
+				img.set_pixel(x, y, color if dist <= r - 4.0 else ring)
+			elif dist <= r:
+				var c := ring
+				c.a = clampf(r - dist, 0.0, 1.0)
+				img.set_pixel(x, y, c)
+	return ImageTexture.create_from_image(img)
+
+
+func _style_slider(s: HSlider, accent: Color) -> void:
+	var track := StyleBoxFlat.new()
+	track.bg_color = Color(0.14, 0.11, 0.12)
+	track.set_corner_radius_all(6)
+	track.content_margin_top = 5
+	track.content_margin_bottom = 5
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = accent
+	fill.set_corner_radius_all(6)
+	fill.content_margin_top = 5
+	fill.content_margin_bottom = 5
+	s.add_theme_stylebox_override("slider", track)
+	s.add_theme_stylebox_override("grabber_area", fill)
+	s.add_theme_stylebox_override("grabber_area_highlight", fill)
+	var gr := 17 if mobile else 11
+	s.add_theme_icon_override("grabber", _circle_tex(gr, Color(0.96, 0.9, 0.78), accent))
+	s.add_theme_icon_override("grabber_highlight", _circle_tex(gr + 2, Color.WHITE, accent.lightened(0.3)))
+
+
 func _slider_row(parent: Control, text: String, min_v: float, max_v: float, step: float, value: float, fmt: Callable, on_change: Callable) -> void:
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 14)
+	row.add_theme_constant_override("separation", 16)
 	parent.add_child(row)
 	var l := _label(text, 22)
-	l.custom_minimum_size = Vector2(170, 0)
+	l.custom_minimum_size = Vector2(190, 0)
 	row.add_child(l)
 	var s := HSlider.new()
 	s.min_value = min_v
 	s.max_value = max_v
 	s.step = step
 	s.value = value
-	s.custom_minimum_size = Vector2(380, 30)
+	s.custom_minimum_size = Vector2(260 if mobile else 400, 48 if mobile else 30)
+	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_style_slider(s, ACCENT)
 	row.add_child(s)
 	var vl := _label(fmt.call(value), 22, GOLD, HORIZONTAL_ALIGNMENT_RIGHT)
-	vl.custom_minimum_size = Vector2(90, 0)
+	vl.custom_minimum_size = Vector2(80, 0)
 	row.add_child(vl)
 	s.value_changed.connect(func(v: float) -> void:
 		vl.text = fmt.call(v)
 		on_change.call(v))
 
 
+func _toggle_row(parent: Control, text: String, value: bool, on_change: Callable, hint: String = "") -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 16)
+	parent.add_child(row)
+	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(v)
+	v.add_child(_label(text, 22))
+	if hint != "":
+		v.add_child(_label(hint, 15, Color(0.65, 0.65, 0.7)))
+	var b := Button.new()
+	b.toggle_mode = true
+	b.button_pressed = value
+	b.custom_minimum_size = Vector2(130, 54) if mobile else Vector2(110, 40)
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	b.add_theme_font_size_override("font_size", 22 if mobile else 20)
+	var refresh := func() -> void:
+		var on := b.button_pressed
+		b.text = "開啟" if on else "關閉"
+		var c := Color(0.35, 0.75, 0.45) if on else Color(0.5, 0.5, 0.55)
+		b.add_theme_color_override("font_color", c.lightened(0.4))
+		b.add_theme_color_override("font_hover_color", Color.WHITE)
+		b.add_theme_color_override("font_pressed_color", c.lightened(0.5))
+		b.add_theme_color_override("font_hover_pressed_color", Color.WHITE)
+		for st in ["normal", "hover", "pressed", "focus", "hover_pressed"]:
+			b.add_theme_stylebox_override(st, _box(c.darkened(0.7 if st != "hover" else 0.55), c, 2, 20))
+	refresh.call()
+	b.toggled.connect(func(on: bool) -> void:
+		refresh.call()
+		on_change.call(on))
+	row.add_child(b)
+
+
+# 單選列：一排互斥按鈕（例如畫質）
+func _choice_row(parent: Control, text: String, options: Array, current: int, on_change: Callable, hint: String = "") -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	parent.add_child(row)
+	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(v)
+	v.add_child(_label(text, 22))
+	if hint != "":
+		v.add_child(_label(hint, 15, Color(0.65, 0.65, 0.7)))
+	var buttons: Array = []
+	for i in options.size():
+		var opt: Array = options[i]   # [顯示文字, 值]
+		var b := Button.new()
+		b.text = str(opt[0])
+		b.toggle_mode = true
+		b.custom_minimum_size = Vector2(76, 54 if mobile else 40)
+		b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		b.add_theme_font_size_override("font_size", 20)
+		buttons.append(b)
+		row.add_child(b)
+	var refresh := func(sel: int) -> void:
+		for i in buttons.size():
+			var b: Button = buttons[i]
+			var on: bool = int(options[i][1]) == sel
+			b.set_pressed_no_signal(on)
+			var c := Color(0.35, 0.65, 0.85) if on else Color(0.45, 0.45, 0.5)
+			b.add_theme_color_override("font_color", c.lightened(0.45))
+			b.add_theme_color_override("font_pressed_color", Color.WHITE)
+			b.add_theme_color_override("font_hover_color", Color.WHITE)
+			for st in ["normal", "hover", "pressed", "focus", "hover_pressed"]:
+				b.add_theme_stylebox_override(st, _box(c.darkened(0.7 if on else 0.8), c, 2, 10))
+	refresh.call(current)
+	for i in buttons.size():
+		var val: int = int(options[i][1])
+		(buttons[i] as Button).pressed.connect(func() -> void:
+			refresh.call(val)
+			on_change.call(val))
+
+
+func _section(parent: Control, title: String, accent: Color) -> VBoxContainer:
+	var p := _panel(Vector2.ZERO, accent.darkened(0.2))
+	p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(p)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 14)
+	p.add_child(col)
+	col.add_child(_label(title, 24, accent.lightened(0.3)))
+	var rule := ColorRect.new()
+	rule.color = Color(accent.r, accent.g, accent.b, 0.5)
+	rule.custom_minimum_size = Vector2(0, 2)
+	col.add_child(rule)
+	return col
+
+
+func _key_chip(row: Control, key: String, action: String) -> void:
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 8)
+	var k := PanelContainer.new()
+	k.add_theme_stylebox_override("panel", _box(Color(0.16, 0.13, 0.12), Color(0.45, 0.4, 0.35), 2, 6))
+	k.add_child(_label(key, 16, Color(0.98, 0.9, 0.7)))
+	h.add_child(k)
+	h.add_child(_label(action, 16, Color(0.82, 0.82, 0.88)))
+	row.add_child(h)
+
+
 func _page_settings() -> void:
 	var content := _page_frame("設定")
-	var panel := _panel(Vector2(0, 0), Color(0.5, 0.55, 0.6, 0.9))
-	content.add_child(panel)
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 16)
-	panel.add_child(col)
+	var cols := HBoxContainer.new()
+	cols.add_theme_constant_override("separation", 20)
+	cols.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content.add_child(cols)
 
-	_slider_row(col, "主音量", 0.0, 1.0, 0.05, Save.volume,
+	# 左欄：音訊與畫面
+	var left := VBoxContainer.new()
+	left.add_theme_constant_override("separation", 16)
+	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cols.add_child(left)
+	var snd := _section(left, "音訊與操控", Color(0.8, 0.45, 0.25))
+	_slider_row(snd, "主音量", 0.0, 1.0, 0.05, Save.volume,
 		func(v: float) -> String: return "%d%%" % int(v * 100.0),
 		func(v: float) -> void:
 			Save.volume = v
 			Save.apply_settings())
-	_slider_row(col, "滑鼠靈敏度", 0.2, 3.0, 0.05, Save.sensitivity,
+	_slider_row(snd, "音樂音量", 0.0, 1.0, 0.05, Save.music_volume,
+		func(v: float) -> String: return "關" if v < 0.01 else "%d%%" % int(v * 100.0),
+		func(v: float) -> void:
+			Save.music_volume = v
+			Sfx.apply_music_volume())
+	_slider_row(snd, "視角靈敏度" if mobile else "滑鼠靈敏度", 0.2, 3.0, 0.05, Save.sensitivity,
 		func(v: float) -> String: return "%.2f" % v,
 		func(v: float) -> void: Save.sensitivity = v)
-	_slider_row(col, "視野 (FOV)", 60.0, 110.0, 1.0, Save.fov,
+
+	var vis := _section(left, "畫面", Color(0.35, 0.65, 0.85))
+	_slider_row(vis, "視野 (FOV)", 60.0, 110.0, 1.0, Save.fov,
 		func(v: float) -> String: return "%d" % int(v),
 		func(v: float) -> void: Save.fov = v)
-
-	var fs := CheckButton.new()
-	fs.text = "全螢幕"
-	fs.add_theme_font_size_override("font_size", 22)
-	fs.button_pressed = Save.fullscreen
-	fs.toggled.connect(func(on: bool) -> void:
+	_slider_row(vis, "動態模糊", 0.0, 1.0, 0.05, Save.motion_blur,
+		func(v: float) -> String: return "關" if v < 0.01 else "%d%%" % int(v * 100.0),
+		func(v: float) -> void: Save.motion_blur = v)
+	_choice_row(vis, "畫質", [["自動", -1], ["低", 0], ["中", 1], ["高", 2]], Save.quality,
+		func(v: int) -> void: Save.quality = v,
+		"下次開始遊戲生效；低畫質不啟用動態模糊與陰影")
+	_toggle_row(vis, "全螢幕", Save.fullscreen, func(on: bool) -> void:
 		Save.fullscreen = on
 		Save.apply_settings())
-	col.add_child(fs)
+	_toggle_row(vis, "觸控操作", Save.touch_mode, func(on: bool) -> void: Save.touch_mode = on,
+		"手機 / 平板用；需重新開始遊戲生效")
 
-	var tm := CheckButton.new()
-	tm.text = "觸控操作（手機/平板；需重新開始遊戲生效）"
-	tm.add_theme_font_size_override("font_size", 22)
-	tm.button_pressed = Save.touch_mode
-	tm.toggled.connect(func(on: bool) -> void: Save.touch_mode = on)
-	col.add_child(tm)
+	if mobile:
+		var tch := _section(left, "觸控操作", Color(0.55, 0.8, 0.5))
+		_slider_row(tch, "按鍵大小", 0.7, 1.4, 0.05, Save.touch_scale,
+			func(v: float) -> String: return "%d%%" % int(v * 100.0),
+			func(v: float) -> void: Save.touch_scale = v)
+		_slider_row(tch, "按鍵透明度", 0.3, 1.0, 0.05, Save.touch_opacity,
+			func(v: float) -> String: return "%d%%" % int(v * 100.0),
+			func(v: float) -> void: Save.touch_opacity = v)
+		_toggle_row(tch, "左手模式", Save.left_handed, func(on: bool) -> void: Save.left_handed = on,
+			"搖桿移到右側、按鍵左右對調")
+		tch.add_child(_button("調整按鍵位置", func() -> void: show_page("touch_edit"), Vector2(300, 58), Color(0.55, 0.8, 0.5), false, "wrench"))
+		_toggle_row(tch, "陀螺儀瞄準", Save.gyro_aim, func(on: bool) -> void: Save.gyro_aim = on,
+			"轉動手機微調準星（需要手機有陀螺儀）")
+		_slider_row(tch, "陀螺儀靈敏度", 0.3, 3.0, 0.1, Save.gyro_sens,
+			func(v: float) -> String: return "%.1f" % v,
+			func(v: float) -> void: Save.gyro_sens = v)
+		_toggle_row(tch, "反轉陀螺儀左右", Save.gyro_invert_x, func(on: bool) -> void: Save.gyro_invert_x = on,
+			"若轉動方向相反，請切換此項")
+		_toggle_row(tch, "反轉陀螺儀上下", Save.gyro_invert_y, func(on: bool) -> void: Save.gyro_invert_y = on)
 
-	col.add_child(HSeparator.new())
-	col.add_child(_label("操作說明", 22, Color(0.95, 0.85, 0.6)))
-	col.add_child(_label("WASD 移動　Ctrl 奔跑　Shift 蹲下　空白鍵 跳躍　滑鼠 瞄準　左鍵 射擊　右鍵 開鏡(狙擊槍)\nR 換彈　E 拾取　Esc 暫停　Z X C V B 施放技能（殭屍關卡）　1 / 2 / Q 切換槍（大逃殺）", 18, Color(0.85, 0.85, 0.9)))
+	# 右欄：操作說明
+	var right := VBoxContainer.new()
+	right.add_theme_constant_override("separation", 16)
+	right.custom_minimum_size = Vector2(380 if mobile else 430, 0)
+	cols.add_child(right)
+	var help := _section(right, "操作說明", Color(0.82, 0.68, 0.34))
+	if mobile:
+		var tips := [
+			"左下搖桿：移動（推到底往前＝自動奔跑）",
+			"右半邊空白處：拖曳轉動視角",
+			"右下大鍵 / 左側準星鍵：射擊",
+			"跳躍、蹲下、開鏡、換彈、拾取：右側按鈕",
+			"大逃殺：點下方武器欄切換槍枝",
+			"殭屍關卡：點左上技能列施放技能",
+			"左上 ‖ 鍵或手機返回鍵：暫停",
+		]
+		for tip in tips:
+			var tl := _label("・" + tip, 17, Color(0.86, 0.86, 0.9))
+			tl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			tl.custom_minimum_size = Vector2(330, 0)
+			help.add_child(tl)
+	else:
+		var grid := GridContainer.new()
+		grid.columns = 2
+		grid.add_theme_constant_override("h_separation", 22)
+		grid.add_theme_constant_override("v_separation", 9)
+		help.add_child(grid)
+		var keys := [
+			["WASD", "移動"], ["Ctrl", "奔跑"], ["Shift", "蹲下"], ["空白", "跳躍"],
+			["左鍵", "射擊"], ["右鍵", "開鏡"], ["R", "換彈"], ["E", "拾取"],
+			["Esc", "暫停"], ["Z–B", "技能（殭屍）"], ["1 2 Q", "切換槍（逃殺）"],
+		]
+		for k in keys:
+			_key_chip(grid, k[0], k[1])
 
 	if not pause_mode:
+		var danger := _section(right, "存檔", Color(0.8, 0.25, 0.25))
 		var reset_btn: Button = _button("清除所有存檔資料", Callable(), Vector2(300, 46), Color(0.8, 0.2, 0.2))
 		reset_btn.pressed.connect(func() -> void:
 			if not confirm_reset:
@@ -757,75 +1078,177 @@ func _page_settings() -> void:
 				Save.reset_profile()
 				Save.apply_settings()
 				show_page("settings"))
-		col.add_child(reset_btn)
+		danger.add_child(reset_btn)
 
 
 # ---------- 遊戲大廳 ----------
 
-func _mode_card(text: String, accent: Color, cb: Callable) -> Button:
+func _hover_pop(b: Control, scale_to: float = 1.025) -> void:
+	b.resized.connect(func() -> void: b.pivot_offset = b.size * 0.5)
+	b.mouse_entered.connect(func() -> void:
+		b.create_tween().tween_property(b, "scale", Vector2.ONE * scale_to, 0.12).set_trans(Tween.TRANS_QUAD))
+	b.mouse_exited.connect(func() -> void:
+		b.create_tween().tween_property(b, "scale", Vector2.ONE, 0.12).set_trans(Tween.TRANS_QUAD))
+	b.focus_entered.connect(func() -> void:
+		b.create_tween().tween_property(b, "scale", Vector2.ONE * scale_to, 0.12))
+	b.focus_exited.connect(func() -> void:
+		b.create_tween().tween_property(b, "scale", Vector2.ONE, 0.12))
+
+
+func _chip(text: String, color: Color) -> PanelContainer:
+	var p := PanelContainer.new()
+	var sb := _box(color.darkened(0.6), color.darkened(0.2), 1, 14)
+	sb.content_margin_top = 3
+	sb.content_margin_bottom = 3
+	sb.content_margin_left = 10
+	sb.content_margin_right = 10
+	p.add_theme_stylebox_override("panel", sb)
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var l := _label(text, 15, color.lightened(0.45))
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	p.add_child(l)
+	return p
+
+
+# 大型模式卡片：色條 + 標題 + 英文副標 + 說明 + 戰績標籤
+func _mode_card(title: String, tag: String, desc: String, chips: Array, accent: Color, cb: Callable) -> Button:
 	var b := Button.new()
-	b.text = text
-	b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	b.custom_minimum_size = Vector2(430, 150)
-	b.add_theme_font_size_override("font_size", 21)
-	b.add_theme_color_override("font_color", Color.WHITE)
-	var normal := _box(accent.darkened(0.7), accent, 3, 12)
-	normal.content_margin_left = 20
-	normal.content_margin_right = 20
-	var hover := _box(accent.darkened(0.5), accent.lightened(0.3), 4, 12)
-	hover.content_margin_left = 20
-	hover.content_margin_right = 20
+	b.custom_minimum_size = Vector2(540, 190)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var normal := _box(Color(0.05, 0.035, 0.04, 0.9), accent.darkened(0.35), 2, 14)
+	normal.shadow_color = Color(0, 0, 0, 0.5)
+	normal.shadow_size = 10
+	var hover := _box(accent.darkened(0.78), accent.lightened(0.25), 4, 14)
+	hover.shadow_color = Color(accent.r, accent.g, accent.b, 0.35)
+	hover.shadow_size = 18
 	b.add_theme_stylebox_override("normal", normal)
 	b.add_theme_stylebox_override("hover", hover)
 	b.add_theme_stylebox_override("pressed", hover)
 	b.add_theme_stylebox_override("focus", hover)
+
+	var m := MarginContainer.new()
+	m.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for side in ["left", "right", "top", "bottom"]:
+		m.add_theme_constant_override("margin_" + side, 22 if side != "left" else 30)
+	b.add_child(m)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 18)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	m.add_child(h)
+	var bar := ColorRect.new()
+	bar.color = accent
+	bar.custom_minimum_size = Vector2(6, 0)
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(bar)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 5)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(v)
+	var tl := _label(title, 38, accent.lightened(0.5))
+	tl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(tl)
+	var tg := _label(tag, 14, accent.lightened(0.1))
+	tg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(tg)
+	var dl := _label(desc, 17, Color(0.82, 0.82, 0.86))
+	dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(dl)
+	var grow := Control.new()
+	grow.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	grow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(grow)
+	var cr := HBoxContainer.new()
+	cr.add_theme_constant_override("separation", 8)
+	cr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(cr)
+	for c in chips:
+		cr.add_child(_chip(str(c), accent))
+	var go := _label("出擊 ▶", 24, accent.lightened(0.4))
+	go.size_flags_vertical = Control.SIZE_SHRINK_END
+	go.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(go)
 	b.pressed.connect(cb)
+	_hover_pop(b)
 	return b
 
 
 func _page_lobby() -> void:
-	var content := _page_frame("遊戲大廳")
+	var content := _page_frame("遊戲大廳", false)
+	# 大廳保留更多背景，減輕遮罩
+	for c in page_root.get_children():
+		if c is ColorRect:
+			(c as ColorRect).color = Color(0.0, 0.0, 0.0, 0.28)
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 24)
+	row.add_theme_constant_override("separation", 28)
 	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(row)
 
 	# 左：兩種模式
 	var left := VBoxContainer.new()
-	left.add_theme_constant_override("separation", 14)
+	left.add_theme_constant_override("separation", 18)
+	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(left)
-	left.add_child(_label("選擇模式", 24, Color(0.95, 0.85, 0.6)))
-	var z_card := _mode_card("殭屍關卡\n10 個關卡，撐過一波波殭屍進攻，學習並突破技能。\n已通關 %d / %d 關　·　關卡總分 %d" % [Save.cleared_level, LevelDB.count(), Save.level_total()],
+	var br_best := "第 %d 名" % Save.br_best_place if Save.br_best_place > 0 else "尚無"
+	var z_card := _mode_card("殭屍關卡", "ZOMBIE SURVIVAL",
+		"10 個關卡，撐過一波波殭屍進攻，學習並突破技能。",
+		["通關 %d / %d" % [Save.cleared_level, LevelDB.count()], "總分 %d" % Save.level_total()],
 		Color(0.9, 0.35, 0.25), func() -> void:
 			sel_level = mini(Save.cleared_level + 1, LevelDB.count())
 			show_page("levels"))
 	left.add_child(z_card)
-	var br_best := "第 %d 名" % Save.br_best_place if Save.br_best_place > 0 else "尚無"
-	left.add_child(_mode_card("大逃殺\n與 11 名 AI 玩家爭奪最後倖存者！槍要在場上撿，奪冠可獲得空投裝備。\n勝場 %d　·　最佳名次 %s" % [Save.br_wins, br_best],
+	left.add_child(_mode_card("大逃殺", "BATTLE ROYALE",
+		"與 11 名 AI 玩家爭奪最後倖存者！槍要在場上撿，奪冠可獲得空投裝備。",
+		["勝場 %d" % Save.br_wins, "最佳 %s" % br_best, "擊殺 %d" % Save.br_kills],
 		Color(0.95, 0.65, 0.2), func() -> void: show_page("br")))
 	z_card.grab_focus.call_deferred()
 
-	# 右：功能
+	# 右：玩家檔案 + 功能
 	var right := VBoxContainer.new()
-	right.add_theme_constant_override("separation", 10)
+	right.add_theme_constant_override("separation", 12)
+	right.custom_minimum_size = Vector2(400, 0)
 	row.add_child(right)
-	right.add_child(_label("準備", 24, Color(0.95, 0.85, 0.6)))
-	right.add_child(_button("槍枝選擇", func() -> void: show_page("weapons"), Vector2(300, 50)))
-	right.add_child(_button("裝備", func() -> void: show_page("equipment"), Vector2(300, 50), Color(0.4, 0.8, 0.5)))
-	var gtxt := "皮膚抽獎　(可抽獎!)" if Save.can_draw() else "皮膚抽獎"
-	right.add_child(_button(gtxt, func() -> void: show_page("gacha"), Vector2(300, 50), Color(0.75, 0.4, 1.0)))
-	right.add_child(_button("排行榜", func() -> void: show_page("leaderboard"), Vector2(300, 50), Color(0.3, 0.7, 1.0)))
-	right.add_child(_button("設定", _open_settings.bind("lobby"), Vector2(300, 50), Color(0.6, 0.65, 0.7)))
 
 	var weapon: Dictionary = WeaponDB.WEAPONS[Save.selected_weapon]
 	var skin: Dictionary = WeaponDB.SKINS[Save.selected_skin]
-	var sum := _panel(Vector2(300, 0))
-	right.add_child(sum)
-	var sc := VBoxContainer.new()
-	sum.add_child(sc)
-	sc.add_child(_label("目前配置", 18, GOLD))
-	sc.add_child(_label("槍：%s\n皮膚：%s" % [weapon["name"], skin["name"]], 16, Color(0.85, 0.85, 0.9)))
-	sc.add_child(_label("裝備：" + _equip_summary(), 16, Color(0.7, 0.95, 0.75)))
+	var prof := _panel(Vector2(400, 0), GOLD.darkened(0.3))
+	right.add_child(prof)
+	var pv := VBoxContainer.new()
+	pv.add_theme_constant_override("separation", 4)
+	prof.add_child(pv)
+	pv.add_child(_label("目前配置", 20, GOLD))
+	var pc := _make_preview(Save.selected_weapon, Save.selected_skin, Vector2(370, 150))
+	pc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pv.add_child(pc)
+	pv.add_child(_label("%s　·　%s" % [weapon["name"], skin["name"]], 20, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER))
+	var eq := _label("裝備：" + _equip_summary(), 15, Color(0.7, 0.95, 0.75))
+	eq.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	pv.add_child(eq)
+
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	right.add_child(grid)
+	var sz := Vector2(195, 56)
+	var gtxt := "皮膚抽獎 !" if Save.can_draw() else "皮膚抽獎"
+	var qtxt := "任務 !" if Save.mission_claimable_count() > 0 else "任務"
+	grid.add_child(_button("槍枝", func() -> void: show_page("weapons"), sz, GOLD, false, "gun"))
+	grid.add_child(_button("裝備", func() -> void: show_page("equipment"), sz, Color(0.4, 0.8, 0.5), false, "shield"))
+	grid.add_child(_button(gtxt, func() -> void: show_page("gacha"), sz, Color(0.75, 0.4, 1.0), false, "dice"))
+	grid.add_child(_button("排行榜", func() -> void: show_page("leaderboard"), sz, Color(0.3, 0.7, 1.0), false, "trophy"))
+	grid.add_child(_button(qtxt, func() -> void:
+		quest_tab = "daily"
+		show_page("quests"), sz, Color(0.4, 0.85, 0.55), false, "mission"))
+	grid.add_child(_button("設定", _open_settings.bind("lobby"), sz, Color(0.6, 0.65, 0.7), false, "gear"))
+
+	# 進場動畫
+	page_root.modulate.a = 0.0
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(page_root, "modulate:a", 1.0, 0.3)
 
 
 func _equip_summary() -> String:
@@ -877,12 +1300,15 @@ func _page_levels() -> void:
 	h.add_child(info)
 	info.add_child(_label("第 %d 關　%s" % [sel_level, lv_sel["name"]], 28, GOLD))
 	info.add_child(_label(str(lv_sel["desc"]), 18, Color(0.85, 0.85, 0.9)))
+	info.add_child(_label("環境：" + Weather.label_for_level(sel_level), 16, Color(0.6, 0.8, 1.0)))
 	var diff := "波數 %d　·　敵人數量 ×%.2f　·　血量 ×%.2f　·　速度 ×%.2f" % [lv_sel["waves"], lv_sel["count_mult"], lv_sel["hp_mult"], lv_sel["speed_mult"]]
 	info.add_child(_label(diff, 16, Color(0.8, 0.8, 0.85)))
 	info.add_child(_label("首次通關獎勵：%d 喪屍幣" % LevelDB.clear_bonus(sel_level), 16, GOLD))
 	var go := _button("▶　出發", func() -> void: Game.begin_run("zombie", sel_level), Vector2(220, 64), GOLD)
 	go.disabled = not Save.is_level_unlocked(sel_level)
 	h.add_child(go)
+	if mobile:
+		content.move_child(panel, 0)
 
 
 # ---------- 大逃殺介紹 ----------
@@ -903,10 +1329,13 @@ func _page_br() -> void:
 	rules.add_child(_label("規則", 26, GOLD))
 	var lines := [
 		"・共 12 名玩家：你 + 11 名 AI 玩家，活到最後就是第一名",
-		"・開局徒手！槍枝要在地圖上撿取（E 拾取，可帶 2 把，1 / 2 / Q 切換）",
+		"・開局從高空跳傘（跳躍鍵開傘），落地後再撿槍；你和 AI 都是徒手開局",
+		("・槍枝要在地圖上撿取（點「拾取」鈕，可帶 2 把，點下方武器欄切換）" if mobile else "・槍枝要在地圖上撿取（E 拾取，可帶 2 把，1 / 2 / Q 切換）"),
+		("・手榴彈、醫療包、護甲板在右下按鈕使用；被攻擊會打斷治療" if mobile else "・G 丟手榴彈　H 醫療包（3 秒，受傷會中斷）　T 護甲板（+25 護盾）"),
+		"・約 50 秒與 125 秒會空投補給箱（小地圖橘色標記），裡面有好槍和道具，AI 也會搶",
 		"・你的裝備（頭盔、護甲…）是場外裝，會帶進比賽",
 		"・安全區會逐步縮小，圈外持續受傷；小地圖可查看安全區",
-		"・Shift 蹲下（更穩、更難被發現）　Ctrl 奔跑",
+		("・蹲下（更穩、更難被發現）；搖桿推到底往前自動奔跑" if mobile else "・Shift 蹲下（更穩、更難被發現）　Ctrl 奔跑"),
 		"・本模式沒有技能；每擊殺一名玩家獲得 1 喪屍幣，名次越高獎勵越多",
 		"・奪得第一名會有空投降落，打開可獲得裝備（含傳說級空投限定裝備）！",
 	]
@@ -995,6 +1424,509 @@ func _page_equipment() -> void:
 		var v := int(totals[k])
 		tg.add_child(_label("%s　+%d%s" % [EquipDB.STAT_NAMES[k], v, EquipDB.STAT_UNITS[k]], 18, Color(0.85, 0.95, 0.85) if v > 0 else Color(0.5, 0.5, 0.55)))
 
+
+
+# ---------- 手機版面 ----------
+
+# 手機頁面外框的邊距（含安全區）
+func _mobile_margin(extra: float = 14.0) -> MarginContainer:
+	var ins := UIUtil.safe_insets(self)
+	var m := MarginContainer.new()
+	m.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	m.add_theme_constant_override("margin_left", int(ins.x + extra))
+	m.add_theme_constant_override("margin_top", int(ins.y + extra * 0.6))
+	m.add_theme_constant_override("margin_right", int(ins.z + extra))
+	m.add_theme_constant_override("margin_bottom", int(ins.w + extra * 0.6))
+	return m
+
+
+func _mobile_frame(title: String) -> VBoxContainer:
+	var dim := ColorRect.new()
+	dim.color = Color(0.02, 0.01, 0.02, 0.78) if pause_mode else Color(0.0, 0.0, 0.0, 0.5)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	page_root.add_child(dim)
+	var margin := _mobile_margin()
+	page_root.add_child(margin)
+
+	var root := VBoxContainer.new()
+	root.add_theme_constant_override("separation", 10)
+	margin.add_child(root)
+
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 14)
+	root.add_child(header)
+	header.add_child(_button("◀", _back, Vector2(84, 62), ACCENT))
+	var tl := _label(title, 38, Color(0.98, 0.85, 0.6))
+	tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	header.add_child(tl)
+	if not pause_mode:
+		header.add_child(_coin_panel())
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(scroll)
+	var content := VBoxContainer.new()
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_theme_constant_override("separation", 12)
+	scroll.add_child(content)
+	return content
+
+
+func _page_main_mobile() -> void:
+	var margin := _mobile_margin(28.0)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	page_root.add_child(margin)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 20)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_child(row)
+
+	# 左：標題與戰績
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 4)
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(col)
+	col.add_child(_label("SURVIVE　·　FIGHT　·　EVOLVE", 16, Color(0.9, 0.6, 0.5, 0.9)))
+	var title_box := Control.new()
+	title_box.custom_minimum_size = Vector2(440, 100)
+	title_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(title_box)
+	var shadow := _label("廢棄城市", 84, Color(0.55, 0.02, 0.02))
+	shadow.position = Vector2(4, 5)
+	title_box.add_child(shadow)
+	title_label = _label("廢棄城市", 84, Color(0.82, 0.74, 0.6))
+	title_label.add_theme_constant_override("outline_size", 11)
+	title_label.add_theme_color_override("font_outline_color", Color(0.45, 0.04, 0.02))
+	title_box.add_child(title_label)
+	col.add_child(_label("ABANDONED CITY　FPS", 24, Color(0.95, 0.5, 0.35)))
+	var grow := Control.new()
+	grow.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	grow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(grow)
+
+	var weapon: Dictionary = WeaponDB.WEAPONS[Save.selected_weapon]
+	var chips := HBoxContainer.new()
+	chips.add_theme_constant_override("separation", 8)
+	chips.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(chips)
+	chips.add_child(_chip("槍：%s" % weapon["name"], GOLD))
+	chips.add_child(_chip("通關 %d / %d" % [Save.cleared_level, LevelDB.count()], Color(0.9, 0.35, 0.25)))
+	chips.add_child(_chip("逃殺勝場 %d" % Save.br_wins, Color(0.95, 0.65, 0.2)))
+	var chips2 := HBoxContainer.new()
+	chips2.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(chips2)
+	chips2.add_child(_chip("累計擊殺 %d" % (Save.total_kills + Save.br_kills), Color(0.5, 0.7, 0.9)))
+
+	# 右：大按鈕
+	var btns := VBoxContainer.new()
+	btns.add_theme_constant_override("separation", 12)
+	btns.custom_minimum_size = Vector2(380, 0)
+	btns.alignment = BoxContainer.ALIGNMENT_END
+	btns.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(btns)
+	var coin := _coin_panel()
+	coin.size_flags_horizontal = Control.SIZE_SHRINK_END
+	btns.add_child(coin)
+	var gap := Control.new()
+	gap.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btns.add_child(gap)
+	var first := _button("開始遊戲", func() -> void: show_page("lobby"), Vector2(380, 96), GOLD, true, "play")
+	first.add_theme_font_size_override("font_size", 32)
+	btns.add_child(first)
+	btns.add_child(_button("設定", _open_settings.bind("main"), Vector2(380, 66), Color(0.6, 0.65, 0.7), false, "gear"))
+	# 呼吸動畫
+	first.resized.connect(func() -> void: first.pivot_offset = first.size * 0.5)
+	var tw := first.create_tween().set_loops()
+	tw.tween_property(first, "scale", Vector2(1.03, 1.03), 0.9).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(first, "scale", Vector2.ONE, 0.9).set_trans(Tween.TRANS_SINE)
+
+
+# 手機大廳用模式卡：直式排列，整張卡片可點
+func _mode_card_mobile(title: String, tag: String, desc: String, chips: Array, accent: Color, cb: Callable) -> Button:
+	var b := Button.new()
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	b.custom_minimum_size = Vector2(300, 0)
+	var normal := _box(Color(0.05, 0.035, 0.04, 0.92), accent.darkened(0.2), 3, 18)
+	normal.border_width_top = 8
+	normal.shadow_color = Color(0, 0, 0, 0.5)
+	normal.shadow_size = 10
+	var hover := _box(accent.darkened(0.72), accent.lightened(0.25), 4, 18)
+	hover.border_width_top = 8
+	for st in ["pressed", "hover", "focus"]:
+		b.add_theme_stylebox_override(st, hover)
+	b.add_theme_stylebox_override("normal", normal)
+
+	var m := MarginContainer.new()
+	m.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for side in ["left", "right", "bottom"]:
+		m.add_theme_constant_override("margin_" + side, 18)
+	m.add_theme_constant_override("margin_top", 22)
+	b.add_child(m)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	m.add_child(v)
+	var tl := _label(title, 42, accent.lightened(0.5))
+	tl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(tl)
+	var tg := _label(tag, 15, accent.lightened(0.1))
+	tg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(tg)
+	var dl := _label(desc, 18, Color(0.84, 0.84, 0.88))
+	dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(dl)
+	var art_box := Control.new()
+	art_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	art_box.custom_minimum_size = Vector2(0, 60)
+	art_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	art_box.draw.connect(_draw_mode_art.bind(art_box, title, accent))
+	v.add_child(art_box)
+	var cr := HFlowContainer.new()
+	cr.add_theme_constant_override("h_separation", 6)
+	cr.add_theme_constant_override("v_separation", 6)
+	cr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(cr)
+	for c in chips:
+		cr.add_child(_chip(str(c), accent))
+	var go := PanelContainer.new()
+	var gsb := _box(accent.darkened(0.25), accent.lightened(0.1), 2, 12)
+	gsb.content_margin_top = 10
+	gsb.content_margin_bottom = 10
+	go.add_theme_stylebox_override("panel", gsb)
+	go.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var gl := _label("出擊 ▶", 26, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
+	gl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	go.add_child(gl)
+	v.add_child(go)
+	b.pressed.connect(cb)
+	return b
+
+
+# 模式卡中央的簡易插畫：殭屍 = 紅色警戒光暈與剪影；大逃殺 = 縮圈與準星
+func _draw_mode_art(c: Control, title: String, accent: Color) -> void:
+	var sz := c.size
+	var ctr := sz * 0.5
+	var r := minf(sz.x * 0.45, sz.y * 0.48)
+	if r < 10.0:
+		return
+	for i in 6:
+		c.draw_circle(ctr, r * (1.0 - float(i) * 0.14), Color(accent.r, accent.g, accent.b, 0.05 + 0.02 * i))
+	if title == "大逃殺":
+		c.draw_arc(ctr, r, 0.0, TAU, 48, Color(accent.r, accent.g, accent.b, 0.9), 3.0)
+		c.draw_arc(ctr, r * 0.62, 0.0, TAU, 40, Color(1, 1, 1, 0.5), 2.0)
+		for k in 4:
+			var d := Vector2.from_angle(float(k) * PI * 0.5 + 0.4)
+			c.draw_line(ctr + d * r * 0.25, ctr + d * r * 0.5, Color(1, 1, 1, 0.8), 3.0)
+		c.draw_circle(ctr, 4.0, Color(1, 0.3, 0.2))
+	else:
+		var col := Color(0.02, 0.01, 0.02, 0.95)
+		var sc := r / 60.0
+		var hip := ctr + Vector2(0, r * 0.75)
+		var sh := hip + Vector2(6, -r * 1.0) * 1.0
+		c.draw_line(hip + Vector2(-8, 0) * sc, hip + Vector2(-12, 34) * sc * 0.6, col, 12.0 * sc)
+		c.draw_line(hip + Vector2(8, 0) * sc, hip + Vector2(14, 34) * sc * 0.6, col, 12.0 * sc)
+		c.draw_line(hip, sh, col, 30.0 * sc)
+		c.draw_line(sh, sh + Vector2(-48, -10) * sc, col, 9.0 * sc)
+		c.draw_line(sh, sh + Vector2(-42, 0) * sc, col, 9.0 * sc)
+		var head := sh + Vector2(4, -22) * sc
+		c.draw_circle(head, 14.0 * sc, col)
+		c.draw_circle(head + Vector2(-5, -1) * sc, 2.4 * sc + 0.5, Color(1, 0.1, 0.1))
+		c.draw_circle(head + Vector2(3, -1) * sc, 2.4 * sc + 0.5, Color(1, 0.1, 0.1))
+
+
+func _page_lobby_mobile() -> void:
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.3)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	page_root.add_child(dim)
+	var margin := _mobile_margin()
+	page_root.add_child(margin)
+	var root := VBoxContainer.new()
+	root.add_theme_constant_override("separation", 10)
+	margin.add_child(root)
+
+	# 頂列
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 12)
+	root.add_child(header)
+	header.add_child(_button("◀", _back, Vector2(84, 62), ACCENT))
+	var tl := _label("遊戲大廳", 38, Color(0.98, 0.85, 0.6))
+	tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	header.add_child(tl)
+	header.add_child(_coin_panel())
+	header.add_child(_button("設定", _open_settings.bind("lobby"), Vector2(150, 62), Color(0.6, 0.65, 0.7), false, "gear"))
+
+	# 中段：玩家卡 + 兩個模式
+	var body := HBoxContainer.new()
+	body.add_theme_constant_override("separation", 14)
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(body)
+
+	var weapon: Dictionary = WeaponDB.WEAPONS[Save.selected_weapon]
+	var skin: Dictionary = WeaponDB.SKINS[Save.selected_skin]
+	var prof := _panel(Vector2(320, 0), GOLD.darkened(0.3))
+	body.add_child(prof)
+	var pv := VBoxContainer.new()
+	pv.add_theme_constant_override("separation", 4)
+	prof.add_child(pv)
+	pv.add_child(_label("目前配置", 20, GOLD))
+	var pc := _make_preview(Save.selected_weapon, Save.selected_skin, Vector2(290, 170))
+	pc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pv.add_child(pc)
+	pv.add_child(_label("%s" % weapon["name"], 24, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER))
+	pv.add_child(_label("皮膚：%s" % skin["name"], 16, Color(0.8, 0.8, 0.86), HORIZONTAL_ALIGNMENT_CENTER))
+	var dmg_total: float = float(weapon["damage"]) * float(weapon["pellets"])
+	_stat_row(pv, "傷害", dmg_total / 160.0 * 100.0, Color(1.0, 0.4, 0.3))
+	_stat_row(pv, "射速", 1.0 / float(weapon["fire_rate"]) / 16.0 * 100.0, Color(1.0, 0.8, 0.3))
+	_stat_row(pv, "射程", float(weapon["range"]) / 300.0 * 100.0, Color(0.4, 0.75, 1.0))
+	var eq := _label("裝備：" + _equip_summary(), 15, Color(0.7, 0.95, 0.75))
+	eq.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	pv.add_child(eq)
+
+	var br_best := "第 %d 名" % Save.br_best_place if Save.br_best_place > 0 else "尚無"
+	var z_card := _mode_card_mobile("殭屍關卡", "ZOMBIE SURVIVAL",
+		"10 個關卡，撐過一波波殭屍進攻，學習並突破技能。",
+		["通關 %d / %d" % [Save.cleared_level, LevelDB.count()], "總分 %d" % Save.level_total()],
+		Color(0.9, 0.35, 0.25), func() -> void:
+			sel_level = mini(Save.cleared_level + 1, LevelDB.count())
+			show_page("levels"))
+	body.add_child(z_card)
+	body.add_child(_mode_card_mobile("大逃殺", "BATTLE ROYALE",
+		"與 11 名 AI 玩家爭奪最後倖存者！槍要在場上撿，奪冠可獲得空投裝備。",
+		["勝場 %d" % Save.br_wins, "最佳 %s" % br_best, "擊殺 %d" % Save.br_kills],
+		Color(0.95, 0.65, 0.2), func() -> void: show_page("br")))
+
+	# 底部導覽列
+	var nav := HBoxContainer.new()
+	nav.add_theme_constant_override("separation", 10)
+	root.add_child(nav)
+	var nsz := Vector2(0, 66)
+	var gtxt := "抽獎 !" if Save.can_draw() else "抽獎"
+	var qtxt := "任務 !" if Save.mission_claimable_count() > 0 else "任務"
+	var navs := [
+		["槍枝", "weapons", Color(0.82, 0.68, 0.34), "gun"],
+		["裝備", "equipment", Color(0.4, 0.8, 0.5), "shield"],
+		[gtxt, "gacha", Color(0.75, 0.4, 1.0), "dice"],
+		["排行榜", "leaderboard", Color(0.3, 0.7, 1.0), "trophy"],
+		[qtxt, "quests", Color(0.4, 0.85, 0.55), "mission"],
+	]
+	for n in navs:
+		var page: String = n[1]
+		var nb := _button(n[0], func() -> void:
+			quest_tab = "daily"
+			show_page(page), nsz, n[2], false, n[3])
+		nb.add_theme_font_size_override("font_size", 23)
+		nb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		nav.add_child(nb)
+
+	page_root.modulate.a = 0.0
+	create_tween().tween_property(page_root, "modulate:a", 1.0, 0.3)
+
+
+
+# ---------- 任務與成就 ----------
+
+var quest_tab: String = "daily"
+
+
+func _quest_bar(value: float, max_value: float, color: Color) -> ProgressBar:
+	var bar := ProgressBar.new()
+	bar.show_percentage = false
+	bar.max_value = maxf(max_value, 1.0)
+	bar.value = clampf(value, 0.0, max_value)
+	bar.custom_minimum_size = Vector2(0, 14)
+	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = color
+	fill.set_corner_radius_all(6)
+	var back := StyleBoxFlat.new()
+	back.bg_color = Color(0, 0, 0, 0.6)
+	back.set_corner_radius_all(6)
+	bar.add_theme_stylebox_override("fill", fill)
+	bar.add_theme_stylebox_override("background", back)
+	return bar
+
+
+func _page_quests() -> void:
+	var content := _page_frame("任務與成就")
+	Save.ensure_missions()
+	var tabs := HBoxContainer.new()
+	tabs.add_theme_constant_override("separation", 10)
+	content.add_child(tabs)
+	var n_claim := Save.mission_claimable_count()
+	tabs.add_child(_button("每日任務" + (" !" if n_claim > 0 else ""), func() -> void:
+		quest_tab = "daily"
+		show_page("quests"), Vector2(220, 46), Color(0.4, 0.85, 0.55), quest_tab == "daily", "mission"))
+	tabs.add_child(_button("成就　%d / %d" % [Save.achievements.size(), ProgressDB.ACHIEVEMENTS.size()], func() -> void:
+		quest_tab = "ach"
+		show_page("quests"), Vector2(220, 46), Color(1.0, 0.8, 0.3), quest_tab == "ach", "star"))
+
+	if quest_tab == "daily":
+		var hint := _label("每天 0:00 重置　·　完成後點「領取」獲得喪屍幣與經驗值", 17, Color(0.75, 0.75, 0.82))
+		content.add_child(hint)
+		var list: Array = Save.missions["list"]
+		for i in list.size():
+			var m: Dictionary = list[i]
+			var done := int(m["progress"]) >= int(m["target"])
+			var claimed := bool(m["claimed"])
+			var border := Color(0.4, 0.85, 0.55) if done else Color(0.45, 0.45, 0.55)
+			var card := _panel(Vector2(0, 0), border)
+			content.add_child(card)
+			var h := HBoxContainer.new()
+			h.add_theme_constant_override("separation", 18)
+			card.add_child(h)
+			var v := VBoxContainer.new()
+			v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			v.add_theme_constant_override("separation", 6)
+			h.add_child(v)
+			v.add_child(_label(str(m["text"]), 24, Color.WHITE if not claimed else Color(0.6, 0.6, 0.65)))
+			var br := HBoxContainer.new()
+			br.add_theme_constant_override("separation", 12)
+			v.add_child(br)
+			br.add_child(_quest_bar(float(m["progress"]), float(m["target"]), Color(0.4, 0.85, 0.55)))
+			var pl := _label("%d / %d" % [int(m["progress"]), int(m["target"])], 18, Color(0.85, 0.9, 0.85))
+			pl.custom_minimum_size = Vector2(90, 0)
+			br.add_child(pl)
+			var chips := HBoxContainer.new()
+			chips.add_theme_constant_override("separation", 8)
+			v.add_child(chips)
+			chips.add_child(_chip("+%d 喪屍幣" % int(m["coins"]), GOLD))
+			chips.add_child(_chip("+%d 經驗" % int(m["xp"]), Color(0.5, 0.75, 1.0)))
+			var btn: Button
+			if claimed:
+				btn = _button("已領取", Callable(), Vector2(170, 56), Color(0.5, 0.5, 0.55), false, "check")
+				btn.disabled = true
+			elif done:
+				var idx := i
+				btn = _button("領取", func() -> void:
+					if Game.claim_mission(idx):
+						Sfx.play("pickup", 0.0, 1.4)
+					show_page("quests"), Vector2(170, 56), GOLD, true, "coin")
+			else:
+				btn = _button("進行中", Callable(), Vector2(170, 56), Color(0.45, 0.45, 0.55))
+				btn.disabled = true
+			btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			h.add_child(btn)
+	else:
+		var grid := GridContainer.new()
+		grid.columns = 2
+		grid.add_theme_constant_override("h_separation", 12)
+		grid.add_theme_constant_override("v_separation", 12)
+		content.add_child(grid)
+		for a in ProgressDB.ACHIEVEMENTS:
+			var unlocked := Save.achievements.has(a["id"])
+			var cur := int(Save.stats.get(a["stat"], 0))
+			var card := _panel(Vector2(0, 0), Color(1.0, 0.8, 0.3) if unlocked else Color(0.4, 0.4, 0.5))
+			card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			grid.add_child(card)
+			var h := HBoxContainer.new()
+			h.add_theme_constant_override("separation", 12)
+			card.add_child(h)
+			var ic := IconRect.make("check" if unlocked else "star", Color(1.0, 0.85, 0.35) if unlocked else Color(0.45, 0.45, 0.52), 38)
+			ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			h.add_child(ic)
+			var v := VBoxContainer.new()
+			v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			v.add_theme_constant_override("separation", 3)
+			h.add_child(v)
+			v.add_child(_label(str(a["name"]), 21, Color(1.0, 0.88, 0.5) if unlocked else Color.WHITE))
+			var dl := _label(str(a["desc"]), 15, Color(0.78, 0.78, 0.84))
+			dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			v.add_child(dl)
+			var br := HBoxContainer.new()
+			v.add_child(br)
+			br.add_child(_quest_bar(float(cur), float(a["target"]), Color(1.0, 0.8, 0.3) if unlocked else Color(0.45, 0.6, 0.85)))
+			var pl := _label("%d / %d" % [mini(cur, int(a["target"])), int(a["target"])], 15, Color(0.85, 0.85, 0.9), HORIZONTAL_ALIGNMENT_RIGHT)
+			pl.custom_minimum_size = Vector2(80, 0)
+			br.add_child(pl)
+			v.add_child(_label("獎勵 +%d 喪屍幣%s" % [int(a["coins"]), ("　+%d 經驗" % int(a["xp"])) if int(a["xp"]) > 0 else ""], 14, GOLD.darkened(0.1)))
+
+
+
+# ---------- 觸控按鍵位置編輯 ----------
+
+func _page_touch_edit() -> void:
+	var editor := TouchEditor.new()
+	page_root.add_child(editor)
+	var ins := UIUtil.safe_insets(self)
+	var panel := _panel(Vector2.ZERO, Color(0.4, 0.7, 0.9, 0.9))
+	panel.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	panel.offset_top = ins.y + 10.0
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	page_root.add_child(panel)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 8)
+	panel.add_child(col)
+	col.add_child(_label("拖曳圓形按鍵調整位置（所見即所得）", 20, Color(0.85, 0.92, 1.0), HORIZONTAL_ALIGNMENT_CENTER))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	col.add_child(row)
+	var sc := _compact_slider("大小", 0.7, 1.4, 0.05, Save.touch_scale, func(v: float) -> void:
+		Save.touch_scale = v
+		editor.queue_redraw())
+	row.add_child(sc)
+	var op := _compact_slider("透明度", 0.3, 1.0, 0.05, Save.touch_opacity, func(v: float) -> void:
+		Save.touch_opacity = v
+		editor.queue_redraw())
+	row.add_child(op)
+	var lh := Button.new()
+	lh.toggle_mode = true
+	lh.button_pressed = Save.left_handed
+	lh.text = "左手模式：" + ("開" if Save.left_handed else "關")
+	lh.custom_minimum_size = Vector2(170, 48)
+	lh.add_theme_font_size_override("font_size", 19)
+	lh.toggled.connect(func(on: bool) -> void:
+		Save.left_handed = on
+		lh.text = "左手模式：" + ("開" if on else "關")
+		editor.queue_redraw())
+	row.add_child(lh)
+	var brow := HBoxContainer.new()
+	brow.add_theme_constant_override("separation", 14)
+	brow.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_child(brow)
+	brow.add_child(_button("重設位置", func() -> void:
+		Save.touch_layout = {}
+		Save.touch_scale = 1.0
+		Save.touch_opacity = 0.85
+		Save.left_handed = false
+		Save.save()
+		show_page("touch_edit"), Vector2(180, 52), Color(0.8, 0.45, 0.3)))
+	brow.add_child(_button("完成", _back, Vector2(180, 52), GOLD, true, "check"))
+
+
+# 精簡的標題 + 滑桿（編輯器面板用）
+func _compact_slider(text: String, min_v: float, max_v: float, step: float, value: float, on_change: Callable) -> Control:
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 8)
+	h.add_child(_label(text, 19))
+	var s := HSlider.new()
+	s.min_value = min_v
+	s.max_value = max_v
+	s.step = step
+	s.value = value
+	s.custom_minimum_size = Vector2(150, 40)
+	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_style_slider(s, Color(0.4, 0.7, 0.9))
+	h.add_child(s)
+	var vl := _label("%d%%" % int(value * 100.0), 19, GOLD)
+	vl.custom_minimum_size = Vector2(56, 0)
+	h.add_child(vl)
+	s.value_changed.connect(func(v: float) -> void:
+		vl.text = "%d%%" % int(v * 100.0)
+		on_change.call(v))
+	return h
 
 
 # ---------- 按鈕回呼 ----------

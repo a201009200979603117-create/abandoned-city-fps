@@ -1,1 +1,60 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128"><rect width="124" height="124" x="2" y="2" fill="#363d52" stroke="#212532" stroke-width="4" rx="14"/><g fill="#fff" transform="translate(12.322 12.322)scale(.101)"><path d="M105 673v33q407 354 814 0v-33z"/><path fill="#478cbf" d="m105 673 152 14q12 1 15 14l4 67 132 10 8-61q2-11 15-15h162q13 4 15 15l8 61 132-10 4-67q3-13 15-14l152-14V427q30-39 56-81-35-59-83-108-43 20-82 47-40-37-88-64 7-51 8-102-59-28-123-42-26 43-46 89-49-7-98 0-20-46-46-89-64 14-123 42 1 51 8 102-48 27-88 64-39-27-82-47-48 49-83 108 26 42 56 81zm0 33v39c0 276 813 276 814 0v-39l-134 12-5 69q-2 10-14 13l-162 11q-12 0-16-11l-10-65H446l-10 65q-4 11-16 11l-162-11q-12-3-14-13l-5-69z"/><path d="M483 600c0 34 58 34 58 0v-86c0-34-58-34-58 0z"/><circle cx="725" cy="526" r="90"/><circle cx="299" cy="526" r="90"/></g><g fill="#414042" transform="translate(12.322 12.322)scale(.101)"><circle cx="307" cy="532" r="60"/><circle cx="717" cy="532" r="60"/></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b0716"/>
+      <stop offset="0.55" stop-color="#3a1224"/>
+      <stop offset="1" stop-color="#b3391b"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#f6d9a0" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#f6d9a0" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="round"><rect width="512" height="512" rx="96"/></clipPath>
+  </defs>
+  <g clip-path="url(#round)">
+    <rect width="512" height="512" fill="url(#sky)"/>
+    <circle cx="330" cy="170" r="150" fill="url(#glow)"/>
+    <circle cx="330" cy="170" r="74" fill="#f4dcae"/>
+    <circle cx="308" cy="150" r="14" fill="#dcc08c"/>
+    <circle cx="352" cy="196" r="10" fill="#dcc08c"/>
+    <!-- 遠景高樓 -->
+    <g fill="#2a0f1e">
+      <rect x="20" y="290" width="62" height="222"/>
+      <rect x="96" y="250" width="54" height="262"/>
+      <rect x="170" y="310" width="70" height="202"/>
+      <rect x="258" y="270" width="58" height="242"/>
+      <rect x="336" y="320" width="66" height="192"/>
+      <rect x="414" y="280" width="80" height="232"/>
+    </g>
+    <!-- 近景 -->
+    <g fill="#0a0510">
+      <rect x="0" y="360" width="86" height="152"/>
+      <polygon points="86,360 86,330 134,330 134,512 86,512"/>
+      <rect x="150" y="380" width="96" height="132"/>
+      <rect x="262" y="350" width="74" height="162"/>
+      <rect x="352" y="390" width="84" height="122"/>
+      <rect x="436" y="340" width="76" height="172"/>
+    </g>
+    <g fill="#ffb347" opacity="0.9">
+      <rect x="40" y="320" width="8" height="12"/>
+      <rect x="112" y="280" width="8" height="12"/>
+      <rect x="190" y="340" width="8" height="12"/>
+      <rect x="274" y="300" width="8" height="12"/>
+      <rect x="430" y="310" width="8" height="12"/>
+      <rect x="174" y="416" width="8" height="12"/>
+      <rect x="372" y="424" width="8" height="12"/>
+    </g>
+    <!-- 準星 -->
+    <g fill="none" stroke="#ff5a2e" stroke-width="14" stroke-linecap="round">
+      <circle cx="256" cy="268" r="128"/>
+      <line x1="256" y1="96" x2="256" y2="150"/>
+      <line x1="256" y1="386" x2="256" y2="440"/>
+      <line x1="84" y1="268" x2="138" y2="268"/>
+      <line x1="374" y1="268" x2="428" y2="268"/>
+    </g>
+    <circle cx="256" cy="268" r="11" fill="#ff5a2e"/>
+    <!-- 殭屍紅眼 -->
+    <circle cx="206" cy="460" r="7" fill="#ff2a2a"/>
+    <circle cx="228" cy="460" r="7" fill="#ff2a2a"/>
+  </g>
+</svg>

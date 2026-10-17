@@ -44,9 +44,9 @@ func _on_body_entered(body: Node3D) -> void:
 		player_in_range = body
 
 		if pickup_type == PickupType.AMMO:
-			pickup_hint.text = "按 E 拾取彈藥"
+			pickup_hint.text = "%s拾取彈藥" % Save.interact_hint()
 		else:
-			pickup_hint.text = "按 E 拾取醫療補給"
+			pickup_hint.text = "%s拾取醫療補給" % Save.interact_hint()
 
 		pickup_hint.visible = true
 

@@ -4,8 +4,9 @@ extends Node
 const WeaponDB = preload("res://scripts/data/weapon_db.gd")
 const EquipDB = preload("res://scripts/data/equip_db.gd")
 const LevelDB = preload("res://scripts/data/level_db.gd")
+const ProgressDB = preload("res://scripts/data/progress_db.gd")
 
-const PATH: String = "user://profile.cfg"
+var PATH: String = OS.get_environment("AC_SAVE") if OS.get_environment("AC_SAVE") != "" else "user://profile.cfg"   # 測試可用環境變數 AC_SAVE 改用獨立存檔
 const DRAW_COST: int = 10
 const DUPLICATE_REFUND: int = 4
 
@@ -32,10 +33,28 @@ var br_best_points: int = 0
 
 # 設定
 var volume: float = 0.8
+var music_volume: float = 0.7
 var sensitivity: float = 1.0
 var fov: float = 75.0
 var fullscreen: bool = false
+var motion_blur: float = 0.6   # 0 = 關閉
 var touch_mode: bool = OS.has_feature("mobile")   # 手機預設啟用觸控操作
+var quality: int = -1            # 畫質：0 低 / 1 中 / 2 高；-1 = 依裝置自動
+var touch_scale: float = 1.0     # 觸控按鍵大小倍率
+var touch_opacity: float = 0.85  # 觸控按鍵不透明度
+var touch_layout: Dictionary = {}   # 按鍵 id -> [dx, dy]（自訂位置）
+var left_handed: bool = false   # 左手模式：左右配置對調
+var gyro_aim: bool = false
+var gyro_sens: float = 1.0
+var gyro_invert_x: bool = false
+var gyro_invert_y: bool = false
+
+# 成長
+var xp: int = 0
+var stats: Dictionary = {}
+var achievements: Dictionary = {}
+var attachments: Dictionary = {}     # 槍枝 id -> {配件: 等級}
+var missions: Dictionary = {}        # {date, list}
 
 
 func _ready() -> void:
@@ -82,10 +101,31 @@ func load_profile() -> void:
 	if skins is Array:
 		owned_skins = skins
 	volume = float(cfg.get_value("settings", "volume", 0.8))
+	music_volume = float(cfg.get_value("settings", "music_volume", 0.7))
 	sensitivity = float(cfg.get_value("settings", "sensitivity", 1.0))
 	fov = float(cfg.get_value("settings", "fov", 75.0))
 	fullscreen = bool(cfg.get_value("settings", "fullscreen", false))
+	motion_blur = float(cfg.get_value("settings", "motion_blur", 0.6))
 	touch_mode = bool(cfg.get_value("settings", "touch_mode", OS.has_feature("mobile")))
+	quality = int(cfg.get_value("settings", "quality", -1))
+	touch_scale = float(cfg.get_value("settings", "touch_scale", 1.0))
+	touch_opacity = float(cfg.get_value("settings", "touch_opacity", 0.85))
+	left_handed = bool(cfg.get_value("settings", "left_handed", false))
+	gyro_aim = bool(cfg.get_value("settings", "gyro_aim", false))
+	gyro_sens = float(cfg.get_value("settings", "gyro_sens", 1.0))
+	gyro_invert_x = bool(cfg.get_value("settings", "gyro_invert_x", false))
+	gyro_invert_y = bool(cfg.get_value("settings", "gyro_invert_y", false))
+	var tl: Variant = cfg.get_value("settings", "touch_layout", {})
+	touch_layout = tl if tl is Dictionary else {}
+	xp = int(cfg.get_value("progress", "xp", 0))
+	var st: Variant = cfg.get_value("progress", "stats", {})
+	stats = st if st is Dictionary else {}
+	var ac: Variant = cfg.get_value("progress", "achievements", {})
+	achievements = ac if ac is Dictionary else {}
+	var at: Variant = cfg.get_value("progress", "attachments", {})
+	attachments = at if at is Dictionary else {}
+	var ms: Variant = cfg.get_value("progress", "missions", {})
+	missions = ms if ms is Dictionary else {}
 	# 防呆：資料表若改版，回到預設
 	if not WeaponDB.WEAPONS.has(selected_weapon):
 		selected_weapon = "rifle"
@@ -116,10 +156,26 @@ func save() -> void:
 	cfg.set_value("profile", "br_kills", br_kills)
 	cfg.set_value("profile", "br_best_points", br_best_points)
 	cfg.set_value("settings", "volume", volume)
+	cfg.set_value("settings", "music_volume", music_volume)
 	cfg.set_value("settings", "sensitivity", sensitivity)
 	cfg.set_value("settings", "fov", fov)
 	cfg.set_value("settings", "fullscreen", fullscreen)
+	cfg.set_value("settings", "motion_blur", motion_blur)
 	cfg.set_value("settings", "touch_mode", touch_mode)
+	cfg.set_value("settings", "quality", quality)
+	cfg.set_value("settings", "touch_scale", touch_scale)
+	cfg.set_value("settings", "touch_opacity", touch_opacity)
+	cfg.set_value("settings", "left_handed", left_handed)
+	cfg.set_value("settings", "gyro_aim", gyro_aim)
+	cfg.set_value("settings", "gyro_sens", gyro_sens)
+	cfg.set_value("settings", "gyro_invert_x", gyro_invert_x)
+	cfg.set_value("settings", "gyro_invert_y", gyro_invert_y)
+	cfg.set_value("settings", "touch_layout", touch_layout)
+	cfg.set_value("progress", "xp", xp)
+	cfg.set_value("progress", "stats", stats)
+	cfg.set_value("progress", "achievements", achievements)
+	cfg.set_value("progress", "attachments", attachments)
+	cfg.set_value("progress", "missions", missions)
 	cfg.save(PATH)
 
 
@@ -142,7 +198,17 @@ func reset_profile() -> void:
 	br_best_place = 0
 	br_kills = 0
 	br_best_points = 0
+	xp = 0
+	stats = {}
+	achievements = {}
+	attachments = {}
+	missions = {}
 	save()
+
+
+# 拾取提示文字（手機點按鈕、桌機按 E）
+func interact_hint() -> String:
+	return "點「拾取」鈕" if touch_mode else "按 E "
 
 
 func apply_settings() -> void:
@@ -158,6 +224,75 @@ func apply_settings() -> void:
 
 func add_coins(n: int) -> void:
 	coins += n
+
+
+# ---------- 畫質 ----------
+
+# 實際使用的畫質：0 低 / 1 中 / 2 高
+func effective_quality() -> int:
+	if quality >= 0:
+		return clampi(quality, 0, 2)
+	if OS.has_feature("web"):
+		return 0
+	if touch_mode or OS.has_feature("mobile"):
+		return 1
+	return 2
+
+
+# ---------- 等級 ----------
+
+func player_level() -> int:
+	return ProgressDB.level_for(xp)
+
+
+# ---------- 槍枝配件 ----------
+
+func attach_level(weapon_id: String, kind: String) -> int:
+	var d: Variant = attachments.get(weapon_id, {})
+	if d is Dictionary:
+		return int((d as Dictionary).get(kind, 0))
+	return 0
+
+
+# 升級配件：成功回傳 true
+func upgrade_attach(weapon_id: String, kind: String) -> bool:
+	var lv := attach_level(weapon_id, kind)
+	var cost := ProgressDB.attach_cost(kind, lv)
+	if lv >= ProgressDB.ATTACH_MAX or coins < cost:
+		return false
+	coins -= cost
+	var d: Dictionary = attachments.get(weapon_id, {})
+	d[kind] = lv + 1
+	attachments[weapon_id] = d
+	save()
+	return true
+
+
+func attach_maxed_count() -> int:
+	var n := 0
+	for wid in attachments:
+		for k in (attachments[wid] as Dictionary):
+			if int(attachments[wid][k]) >= ProgressDB.ATTACH_MAX:
+				n += 1
+	return n
+
+
+# ---------- 每日任務 ----------
+
+func ensure_missions() -> void:
+	var today := Time.get_date_string_from_system()
+	if str(missions.get("date", "")) != today or not missions.has("list"):
+		missions = {"date": today, "list": ProgressDB.generate(today)}
+		save()
+
+
+func mission_claimable_count() -> int:
+	ensure_missions()
+	var n := 0
+	for m in missions["list"]:
+		if int(m["progress"]) >= int(m["target"]) and not bool(m["claimed"]):
+			n += 1
+	return n
 
 
 func record_run(score: int, wave: int, kills: int) -> void:

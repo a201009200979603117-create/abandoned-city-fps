@@ -8,6 +8,7 @@ var embers: Array = []
 var zombies: Array = []
 var lamp_x: Array = []
 var built_size: Vector2 = Vector2.ZERO
+var redraw_acc: float = 0.0
 
 
 func _ready() -> void:
@@ -79,7 +80,11 @@ func _process(delta: float) -> void:
 		if e[1] < -10.0:
 			e[1] = size.y + 10.0
 			e[0] = randf() * size.x
-	queue_redraw()
+	# 封面是純裝飾：以 30 FPS 重繪即可（手機再降為 20），避免每幀重繪上百個圖形
+	redraw_acc += delta
+	if redraw_acc >= (0.05 if Save.touch_mode else 0.033):
+		redraw_acc = 0.0
+		queue_redraw()
 
 
 func _draw() -> void:

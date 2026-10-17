@@ -13,11 +13,12 @@ func _process(_delta: float) -> bool:
 		var game := root.get_node("Game")
 		game.mode = "zombie"
 		game._apply_level(1)
+		game.skip_menu = true
 		main = load("res://main.tscn").instantiate()
 		root.add_child(main)
 		current_scene = main
 	elif frames == 5:
-		main.get_node("UI")._begin_run()
+		pass
 	elif frames > 10 and frames < 700:
 		var weapon: Node = main.get_node("Player/Head/Camera3D/Weapon")
 		if frames == 60:

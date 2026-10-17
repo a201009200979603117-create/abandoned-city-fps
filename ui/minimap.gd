@@ -28,6 +28,14 @@ func _draw() -> void:
 		manager = get_node_or_null("/root/Main/BR")
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0.05, 0.07, 0.1, 0.72))
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0.7, 0.75, 0.85, 0.8), false, 2.0)
+	if manager != null and manager.get("supply_drops") != null:
+		var tpulse := 0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.008)
+		for d in manager.supply_drops:
+			if not is_instance_valid(d):
+				continue
+			var p := _to_map((d as Node3D).global_position)
+			draw_rect(Rect2(p - Vector2(4, 4), Vector2(8, 8)), Color(1.0, 0.7, 0.2, tpulse), true)
+			draw_rect(Rect2(p - Vector2(6, 6), Vector2(12, 12)), Color(1.0, 0.85, 0.4, tpulse), false, 1.5)
 	var s := size.x / (HALF * 2.0)
 	# 道路
 	for axis in [-50.0, 0.0, 50.0]:

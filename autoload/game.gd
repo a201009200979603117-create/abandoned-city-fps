@@ -4,6 +4,7 @@ extends Node
 const Leaderboard = preload("res://scripts/data/leaderboard.gd")
 const SkillDB = preload("res://scripts/data/skill_db.gd")
 const LevelDB = preload("res://scripts/data/level_db.gd")
+const ProgressDB = preload("res://scripts/data/progress_db.gd")
 
 signal state_changed(new_state: int)
 signal wave_started(wave: int)
@@ -12,6 +13,9 @@ signal hit_marker(killed: bool)
 signal skill_cast(id: String, evolved: bool)
 signal kill_feed(text: String)
 signal banner(text: String)
+signal toast(title: String, text: String, color: Color)         # 成就 / 任務 / 升級通知
+signal hit_detail(zone: String, killed: bool, damage: float, pos: Vector3)   # 命中部位：head / body / leg
+signal boss_changed(boss: Node)                                  # Boss 出場 / 死亡（HUD 血條）
 
 enum State { MENU, PLAYING, PAUSED, WON, LOST, SKILL }
 
@@ -47,6 +51,12 @@ var airdrop_item: String = ""
 var victory_pending: bool = false
 var killed_by: String = ""
 
+# 本局統計（結算畫面使用）
+var run_stats: Dictionary = {}
+var run_xp: int = 0
+var run_level_start: int = 1
+var run_level_coins: int = 0
+
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -58,6 +68,9 @@ func _register_inputs() -> void:
 	# 蹲下：Shift　奔跑：Ctrl
 	_add_key_action("sprint", KEY_CTRL)
 	_add_key_action("crouch", KEY_SHIFT)
+	_add_key_action("grenade", KEY_G)
+	_add_key_action("medkit", KEY_H)
+	_add_key_action("plate", KEY_T)
 
 
 func _add_key_action(action: String, key: Key) -> void:
@@ -111,12 +124,19 @@ func reset() -> void:
 	airdrop_item = ""
 	victory_pending = false
 	killed_by = ""
+	run_stats = {}
+	run_xp = 0
+	run_level_coins = 0
+	run_level_start = Save.player_level()
+	Save.ensure_missions()
 	set_state(State.MENU)
 
 
 func set_state(new_state: State) -> void:
 	state = new_state
 	get_tree().paused = new_state != State.PLAYING
+	# 主選單被 2D 封面完全遮住，關閉 3D 繪製可省下大量 GPU / 電力
+	get_viewport().disable_3d = new_state == State.MENU
 	if new_state == State.PLAYING:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	else:
@@ -137,6 +157,9 @@ func add_kill(points: int) -> void:
 	score += points
 	run_coins += 1
 	Save.add_coins(1)
+	record("kills_total")
+	record("kills_zombie")
+	add_xp(5)
 
 
 # 大逃殺擊殺
@@ -144,6 +167,84 @@ func add_br_kill() -> void:
 	kills += 1
 	run_coins += 1
 	Save.add_coins(1)
+	record("kills_total")
+	record("br_kills")
+	add_xp(25)
+
+
+# ---------- 統計 / 成就 / 任務 / 經驗值 ----------
+
+# 累計統計 +n；同時推進每日任務並檢查成就
+func record(stat: String, n: int = 1) -> void:
+	Save.stats[stat] = int(Save.stats.get(stat, 0)) + n
+	run_stats[stat] = int(run_stats.get(stat, 0)) + n
+	_mission_progress(stat, n)
+	_check_achievements()
+
+
+# 取最大值型統計（例如玩家等級、皮膚數量）
+func record_max(stat: String, value: int) -> void:
+	if value > int(Save.stats.get(stat, 0)):
+		Save.stats[stat] = value
+		_check_achievements()
+
+
+func _check_achievements() -> void:
+	for id in ProgressDB.check_achievements(Save.stats, Save.achievements):
+		var a: Dictionary = ProgressDB.achievement(id)
+		Save.achievements[id] = Time.get_unix_time_from_system()
+		Save.add_coins(int(a["coins"]))
+		run_coins += int(a["coins"])
+		toast.emit("成就解鎖", "%s　+%d 喪屍幣" % [a["name"], int(a["coins"])], Color(1.0, 0.82, 0.3))
+		Sfx.play("pickup", 0.0, 1.3)
+		if int(a["xp"]) > 0:
+			add_xp(int(a["xp"]), false)
+
+
+func _mission_progress(stat: String, n: int) -> void:
+	Save.ensure_missions()
+	for m in Save.missions["list"]:
+		if str(m["stat"]) != stat or int(m["progress"]) >= int(m["target"]):
+			continue
+		m["progress"] = mini(int(m["progress"]) + n, int(m["target"]))
+		if int(m["progress"]) >= int(m["target"]):
+			toast.emit("每日任務完成", "%s（到大廳「任務」領取獎勵）" % m["text"], Color(0.4, 0.85, 0.55))
+			Sfx.play("pickup", 0.0, 1.5)
+			Save.stats["missions_done"] = int(Save.stats.get("missions_done", 0)) + 1
+			_check_achievements()
+
+
+func add_xp(n: int, announce: bool = true) -> void:
+	var before := Save.player_level()
+	Save.xp += n
+	run_xp += n
+	var after := Save.player_level()
+	if after > before:
+		var reward := 0
+		for lv in range(before + 1, after + 1):
+			reward += ProgressDB.level_reward(lv)
+		Save.add_coins(reward)
+		run_coins += reward
+		run_level_coins += reward
+		if announce:
+			toast.emit("等級提升", "Lv.%d　獎勵 +%d 喪屍幣" % [after, reward], Color(0.5, 0.8, 1.0))
+		record_max("player_level", after)
+
+
+# 領取每日任務獎勵
+func claim_mission(i: int) -> bool:
+	Save.ensure_missions()
+	var list: Array = Save.missions["list"]
+	if i < 0 or i >= list.size():
+		return false
+	var m: Dictionary = list[i]
+	if bool(m["claimed"]) or int(m["progress"]) < int(m["target"]):
+		return false
+	m["claimed"] = true
+	Save.add_coins(int(m["coins"]))
+	add_xp(int(m["xp"]), false)
+	Save.save()
+	return true
 
 
 func skill_level(id: String) -> int:
@@ -206,10 +307,25 @@ func lose() -> void:
 
 func _finish_run(won: bool) -> void:
 	if is_br():
+		record("br_games")
+		if placement <= 3:
+			record("br_top3")
+		if won:
+			record("br_wins")
+		# 名次經驗：越前面越多，奪冠額外加成
+		add_xp(maxi(BR_PLAYERS + 1 - placement, 0) * 12 + (150 if won else 0), false)
 		var res := Save.record_br(placement, kills, BR_PLAYERS)
 		result = {"mode": "br", "place": placement, "points": res["points"], "place_coins": res["coins"], "won": won}
 		last_rank = Leaderboard.rank_of(Save.br_best_points, Save.br_wins, "br")
 	else:
+		if won:
+			record("zombie_wins")
+			add_xp(100 + 10 * level, false)
 		var bonus := Save.record_level(level, score, won)
 		result = {"mode": "zombie", "level": level, "clear_bonus": bonus, "won": won}
 		last_rank = Leaderboard.rank_of(Save.level_total(), Save.cleared_level, "zombie")
+	result["xp"] = run_xp
+	result["level_before"] = run_level_start
+	result["level_after"] = Save.player_level()
+	result["level_coins"] = run_level_coins
+	Save.save()

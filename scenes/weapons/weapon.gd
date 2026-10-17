@@ -3,6 +3,8 @@ extends Node3D
 # 皮膚取自 Save.selected_skin，裝備加成取自 Save.equipped。
 
 const WeaponDB = preload("res://scripts/data/weapon_db.gd")
+const Hitzone = preload("res://scripts/systems/hitzone.gd")
+const CombatFX = preload("res://scripts/systems/combat_fx.gd")
 
 var weapon_id: String = ""
 var weapon_name: String = ""
@@ -17,6 +19,8 @@ var pellets: int = 1
 var spread_deg: float = 0.0
 var automatic: bool = true
 var zoom_fov: float = 0.0
+var scope_lv: int = 0       # 配件：瞄準鏡等級
+var fx: Node3D = null
 
 # 技能加成
 var fire_mult: float = 1.0
@@ -112,6 +116,9 @@ func _ready() -> void:
 	hole_texture.height = 32
 
 	_make_effect_pools()
+	fx = CombatFX.new()
+	var fx_host: Node = get_node_or_null("/root/Main")
+	(fx_host if fx_host != null else self).add_child.call_deferred(fx)
 
 	flash_light = OmniLight3D.new()
 	flash_light.light_color = Color(1.0, 0.8, 0.4)
@@ -151,9 +158,15 @@ func _new_slot(id: String, ammo: int = -1, reserve: int = -1) -> Dictionary:
 	var def: Dictionary = WeaponDB.WEAPONS[id]
 	return {
 		"id": id,
-		"ammo": int(def["mag"]) if ammo < 0 else ammo,
+		"ammo": _mag_for(id) if ammo < 0 else ammo,
 		"reserve": int(float(def["reserve"]) * (1.0 + float(equip["ammo"]) / 100.0)) if reserve < 0 else reserve,
 	}
+
+
+# 擴容彈匣配件後的彈匣容量
+func _mag_for(id: String) -> int:
+	var def: Dictionary = WeaponDB.WEAPONS[id]
+	return int(ceil(float(def["mag"]) * (1.0 + 0.2 * float(Save.attach_level(id, "mag")))))
 
 
 func _store_slot() -> void:
@@ -185,13 +198,15 @@ func _apply_slot() -> void:
 	damage = def["damage"]
 	fire_rate = def["fire_rate"]
 	range_distance = def["range"]
-	magazine_size = def["mag"]
+	magazine_size = _mag_for(weapon_id)
 	reload_time = maxf(float(def["reload"]) * (1.0 - float(equip["reload"]) / 100.0), 0.4)
-	recoil_kick = def["recoil"]
+	# 配件加成
+	recoil_kick = float(def["recoil"]) * (1.0 - 0.1 * float(Save.attach_level(weapon_id, "grip")))
 	pellets = def["pellets"]
-	spread_deg = def["spread"]
+	spread_deg = float(def["spread"]) * (1.0 - 0.1 * float(Save.attach_level(weapon_id, "muzzle")))
 	automatic = def["auto"]
-	zoom_fov = def["zoom"]
+	scope_lv = Save.attach_level(weapon_id, "scope")
+	zoom_fov = float(def["zoom"]) * (1.0 - 0.06 * float(scope_lv)) if float(def["zoom"]) > 0.0 else 0.0
 	current_ammo = slot["ammo"]
 	reserve_ammo = slot["reserve"]
 	model_root = Node3D.new()
@@ -275,7 +290,7 @@ func _process(delta: float) -> void:
 		if reload_left <= 0.0:
 			_finish_reload()
 
-	if player.is_dead or not Game.is_playing():
+	if player.is_dead or not Game.is_playing() or bool(player.get("skydiving")):
 		return
 
 	_update_zoom(delta)
@@ -307,9 +322,9 @@ func _ads_held() -> bool:
 
 func _update_zoom(delta: float) -> void:
 	var want := armed and reload_left <= 0.0 and not bool(player.get("is_sprinting")) and _ads_held()
-	ads = move_toward(ads, 1.0 if want else 0.0, delta * (6.0 if zoom_fov > 0.0 else 8.0))
+	ads = move_toward(ads, 1.0 if want else 0.0, delta * (6.0 if zoom_fov > 0.0 else 8.0) * (1.0 + 0.1 * float(scope_lv)))
 	player.set("ads_factor", ads)
-	var ads_fov := zoom_fov if zoom_fov > 0.0 else Save.fov * 0.82
+	var ads_fov := zoom_fov if zoom_fov > 0.0 else Save.fov * (0.82 - 0.04 * float(scope_lv))
 	camera.fov = lerpf(Save.fov, ads_fov, smoothstep(0.0, 1.0, ads))
 	if crosshair != null:
 		crosshair.modulate.a = 1.0 - ads * (0.9 if zoom_fov > 0.0 else 0.5)
@@ -368,7 +383,7 @@ func _current_spread() -> float:
 	var s := spread_deg
 	if zoom_fov > 0.0:
 		s += 2.5 * (1.0 - ads)   # 狙擊槍腰射很不準
-	s *= lerpf(1.0, 0.35, ads)
+	s *= lerpf(1.0, 0.35 * (1.0 - 0.1 * float(scope_lv)), ads)
 	s += bloom
 	var speed := Vector2(player.velocity.x, player.velocity.z).length()
 	s += clampf(speed / 5.0, 0.0, 1.4) * (0.5 if ads > 0.5 else 1.3)
@@ -411,6 +426,12 @@ func shoot() -> void:
 	flash_quad.scale = Vector3.ONE * randf_range(0.8, 1.4)
 	flash_time = 0.05
 	Sfx.play("shoot", -6.0, randf_range(0.95, 1.05) * (0.8 if pellets > 1 else 1.0))
+	if fx != null and is_instance_valid(fx):
+		fx.eject_shell(global_position + camera.global_transform.basis.x * 0.08 - camera.global_transform.basis.z * 0.2, camera.global_transform.basis.x, Vector3.UP)
+	if Game.is_br():
+		var mgr := get_node_or_null("/root/Main/BR")
+		if mgr != null and mgr.has_method("noise"):
+			mgr.noise(player.global_position, 80.0 if weapon_id == "sniper" else 55.0, player)
 
 	var space_state := get_world_3d().direct_space_state
 	var origin := camera.global_position
@@ -419,6 +440,10 @@ func shoot() -> void:
 	var any_kill := false
 	var sparks := 0
 	var spread := _current_spread()
+	var shot_dmg := 0.0
+	var best_zone := "none"
+	var last_hit_pos := Vector3.ZERO
+	var living_hit := false
 
 	for i in pellets:
 		var dir := -cam_basis.z
@@ -440,6 +465,17 @@ func shoot() -> void:
 			var half := range_distance * 0.5
 			var falloff := 1.0 if dist <= half else lerpf(1.0, 0.35, (dist - half) / half)
 			var dmg := damage * damage_mult * equip_dmg * falloff
+			var zone := "body"
+			if Hitzone.is_living(target):
+				zone = Hitzone.zone_of(target as Node3D, result["position"])
+				dmg *= Hitzone.multiplier(zone, weapon_id)
+				living_hit = true
+			if zone == "head":
+				best_zone = "head"
+			elif best_zone != "head" and (best_zone == "none" or zone == "body"):
+				best_zone = zone
+			shot_dmg += dmg
+			last_hit_pos = result["position"]
 			if target.is_in_group("br_bots"):
 				target.take_damage(dmg, player)
 			else:
@@ -455,7 +491,14 @@ func shoot() -> void:
 
 	if any_hit:
 		Game.hit_marker.emit(any_kill)
-		Sfx.play("hit", -8.0)
+		Game.hit_detail.emit("body" if best_zone == "none" else best_zone, any_kill, shot_dmg, last_hit_pos)
+		if living_hit and best_zone == "head":
+			Game.record("headshots")
+			Sfx.play("kill_ding" if any_kill else "hit_head", -4.0)
+		elif any_kill:
+			Sfx.play("kill_ding", -6.0)
+		else:
+			Sfx.play("hit", -8.0)
 
 
 # 特效物件池：節點與資源只建立一次，之後重複使用（不會隨射擊不斷配置/釋放記憶體）

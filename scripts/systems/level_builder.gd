@@ -24,13 +24,27 @@ var flicker_timer: float = 0.0
 var assign_timer: float = 0.0
 
 
+const BARREL_SCRIPT = preload("res://scripts/systems/explosive_barrel.gd")
+const WEATHER_SCRIPT = preload("res://scripts/systems/weather.gd")
+const TOXIC_SCRIPT = preload("res://scripts/systems/toxic_zone.gd")
+
 var theme: Dictionary = {}
+var quality_level: int = 2
+var cam_far_override: float = 0.0
+var weather_text: String = ""
+var perf_t: float = 0.0
+var perf_sum: float = 0.0
+var perf_n: int = 0
+var perf_done: bool = false
 var low_spec: bool = false   # 網頁/手機：關閉陰影與泛光、減少粒子與動態光源
 var unit_box: BoxMesh        # 小型道具共用的 1×1×1 方塊（以縮放取得尺寸）
 var skip_chance: float = 0.28
 
 
 func _ready() -> void:
+	# 主選單啟動時不需要城市場景（開始遊戲會重新載入場景）：跳過建構，省下約 2000 個節點與數百 MB 顯存
+	if Game.state == Game.State.MENU:
+		return
 	if Game.is_br():
 		theme = LevelDB.BR_THEME
 		rng.seed = LevelDB.BR_SEED
@@ -39,7 +53,9 @@ func _ready() -> void:
 		theme = Game.level_cfg["theme"]
 		rng.seed = int(Game.level_cfg["seed"])
 		skip_chance = float(Game.level_cfg["skip"])
-	low_spec = Save.touch_mode or OS.has_feature("web")
+	quality_level = Save.effective_quality()
+	# 低畫質一律精簡；中畫質在手機/網頁精簡；高畫質才有陰影與泛光
+	low_spec = quality_level == 0 or (quality_level == 1 and (Save.touch_mode or OS.has_feature("web")))
 	unit_box = BoxMesh.new()
 	unit_box.size = Vector3.ONE
 	building_material = ShaderMaterial.new()
@@ -50,6 +66,7 @@ func _ready() -> void:
 	_build_buildings()
 	_build_props()
 	_build_drums()
+	_build_hazards()
 	_build_street_lights()
 	_build_boundary()
 	player = get_tree().get_first_node_in_group("player") as Node3D
@@ -58,6 +75,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_perf_guard(delta)
 	assign_timer -= delta
 	if assign_timer <= 0.0:
 		assign_timer = 0.3
@@ -71,6 +89,34 @@ func _process(delta: float) -> void:
 	for i in pool.size():
 		if i % 3 == 0:
 			pool[i].light_energy = LIGHT_ENERGY * (0.05 if randf() < 0.14 else randf_range(0.7, 1.0))
+
+
+# 自適應畫質：開局前 8 秒若平均 FPS 過低，自動降一級畫質（只在手機/網頁；一次性）
+func _perf_guard(delta: float) -> void:
+	if perf_done or not Game.is_playing():
+		return
+	perf_t += delta
+	if perf_t < 2.0:
+		return   # 略過載入時的卡頓
+	perf_sum += Engine.get_frames_per_second() * delta
+	perf_n += 1
+	if perf_t < 8.0:
+		return
+	perf_done = true
+	if not (Save.touch_mode or OS.has_feature("web")) or quality_level <= 0:
+		return
+	var avg := perf_sum / maxf(perf_t - 2.0, 0.1)
+	if avg < 32.0:
+		quality_level -= 1
+		Save.quality = quality_level
+		Save.save()
+		low_spec = true
+		get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+		get_viewport().scaling_3d_scale = [0.65, 0.8, 1.0][quality_level]
+		var sun := get_parent().get_node_or_null("World/DirectionalLight3D") as DirectionalLight3D
+		if sun != null:
+			sun.shadow_enabled = false
+		Game.banner.emit("流暢度不足，已自動降低畫質（可在設定調整）")
 
 
 func _setup_environment() -> void:
@@ -111,12 +157,37 @@ func _setup_environment() -> void:
 			sun.shadow_enabled = false   # 手機/網頁效能考量
 	var cam := get_parent().get_node_or_null("Player/Head/Camera3D") as Camera3D
 	if cam != null:
-		cam.far = 130.0   # 濃霧之外不需要繪製，縮短遠裁切面
-	if Save.touch_mode and not OS.has_feature("web"):
-		# 手機：以 75% 解析度繪製再用 FSR 放大，大幅降低填充率負擔
-		get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR
-		get_viewport().scaling_3d_scale = 0.75
+		cam.far = cam_far_override if cam_far_override > 0.0 else 130.0   # 濃霧之外不需要繪製，縮短遠裁切面
+	# 畫質對應的 3D 繪製解析度（低於 1.0 時以雙線性放大，降低填充率負擔）
+	var res_scale: float = [0.65, 0.8, 1.0][quality_level]
+	if res_scale < 1.0:
+		get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+		get_viewport().scaling_3d_scale = res_scale
+	if quality_level == 0:
+		cam_far_override = 85.0
+	_setup_weather()
 	_setup_ash()
+
+
+# 天氣與時段：殭屍關卡依關卡編號固定；大逃殺每場隨機
+func _setup_weather() -> void:
+	var we := get_parent().get_node_or_null("World/WorldEnvironment") as WorldEnvironment
+	var sun := get_parent().get_node_or_null("World/DirectionalLight3D") as DirectionalLight3D
+	if we == null or we.environment == null:
+		return
+	var kind: String
+	var tod: String
+	if Game.is_br():
+		kind = ["clear", "clear", "rain", "fog", "storm"].pick_random()
+		tod = ["dusk", "night", "dawn"].pick_random()
+	else:
+		kind = WEATHER_SCRIPT.weather_for_level(Game.level)
+		tod = WEATHER_SCRIPT.tod_for_level(Game.level)
+	var w := Node3D.new()
+	w.set_script(WEATHER_SCRIPT)
+	add_child(w)
+	w.call("setup", we.environment, sun, kind, tod, quality_level)
+	weather_text = WEATHER_SCRIPT.label(tod, kind)
 
 
 func _setup_ash() -> void:
@@ -453,6 +524,26 @@ func _build_props() -> void:
 			_add_box(Vector3(x, 0.2, z), Vector3(rng.randf_range(1.0, 2.2), 0.4, rng.randf_range(1.0, 2.2)), _make_material(Color(0.21, 0.2, 0.19)), rng.randf_range(0.0, PI))
 
 
+func _build_hazards() -> void:
+	# 殭屍關卡：毒氣區（玩家與殭屍都會受傷）
+	if Game.is_br():
+		return
+	var count := 2 + Game.level / 3
+	var placed := 0
+	var tries := 0
+	while placed < count and tries < 300:
+		tries += 1
+		var x := rng.randf_range(-HALF + 12.0, HALF - 12.0)
+		var z := rng.randf_range(-HALF + 12.0, HALF - 12.0)
+		if _in_footprint(x, z, 6.5) or _near_spawn(x, z) or Vector2(x, z).length() < 20.0:
+			continue
+		placed += 1
+		var zone := Node3D.new()
+		zone.set_script(TOXIC_SCRIPT)
+		zone.position = Vector3(x, 0.0, z)
+		add_child(zone)
+
+
 func _build_drums() -> void:
 	# 生鏽油桶，少數仍在燃燒（提供火光）
 	var rust := _make_material(Color(0.3, 0.13, 0.07))
@@ -465,6 +556,13 @@ func _build_drums() -> void:
 		if _in_footprint(x, z, 1.0) or _near_spawn(x, z):
 			continue
 		placed += 1
+		if placed % 4 == 0:
+			# 紅色爆炸油桶（可射擊引爆）
+			var barrel := StaticBody3D.new()
+			barrel.set_script(BARREL_SCRIPT)
+			barrel.position = Vector3(x, 0.45, z)
+			add_child(barrel)
+			continue
 		var body := StaticBody3D.new()
 		body.position = Vector3(x, 0.45, z)
 		var mi := MeshInstance3D.new()

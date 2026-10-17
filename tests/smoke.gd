@@ -33,6 +33,7 @@ func _start_main() -> void:
 	save = root.get_node("Save")
 	game.mode = mode
 	game._apply_level(level)
+	game.skip_menu = true   # 與正式流程一致：HUD 就緒時直接開局，關卡 / 大逃殺管理才會真的建構
 	main = load("res://main.tscn").instantiate()
 	root.add_child(main)
 	current_scene = main
@@ -47,7 +48,6 @@ func _process(_delta: float) -> bool:
 		return false
 	var hud: Node = main.get_node("UI")
 	if frames == 5:
-		hud._begin_run()
 		print("[test] 模式=", mode, " 關卡=", level, " 波數=", game.total_waves, " state=", game.state)
 
 	if game.state == game.State.SKILL:
