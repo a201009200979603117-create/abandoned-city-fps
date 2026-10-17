@@ -3,15 +3,14 @@
 末日廢墟中的第一人稱射擊遊戲：撐過一波波殭屍進攻，或在 12 人大逃殺中活到最後。
 使用 **Godot 4.7** 開發，所有美術、音效與音樂皆由程式即時產生，不含任何外部素材檔。
 
-## 立即遊玩
+## 立即下載遊玩
 
-| 平台 | 連結 | 說明 |
+| 平台 | 下載 | 說明 |
 |---|---|---|
-| 🌐 **網頁版（最方便）** | **<https://a201009200979603117-create.github.io/abandoned-city-fps/>** | 電腦、手機瀏覽器都能直接玩，不用安裝。首次載入約 40 MB，請耐心等待 |
-| 🖥️ Windows | [Releases → `AbandonedCityFPS-windows.exe`](https://github.com/a201009200979603117-create/abandoned-city-fps/releases/latest) | 單一執行檔，下載後雙擊即可 |
+| 🖥️ Windows | [Releases → `AbandonedCityFPS-windows.exe`](https://github.com/a201009200979603117-create/abandoned-city-fps/releases/latest) | 單一執行檔，下載後雙擊即可，不需安裝 |
 | 📱 Android | [Releases → `AbandonedCityFPS-android-debug.apk`](https://github.com/a201009200979603117-create/abandoned-city-fps/releases/latest) | 需允許「安裝未知來源應用程式」（見下方） |
 
-> 手機網頁版建議用 Chrome / Safari 並將手機**橫放**；想要更流暢請安裝 APK，或到「設定 → 畫質」改成「低」。
+> 本遊戲不提供網頁版（瀏覽器上效能與音訊表現不穩定），請下載上方版本遊玩。想要更流暢請到「設定 → 畫質」調整。
 
 ## 遊戲特色
 
@@ -58,10 +57,9 @@
 3. 安裝後從桌面開啟即可。APK 為 debug 簽章，Play 保護機制可能跳出提示，選擇「仍要安裝」
 
 ## 效能與疑難排解
-- **畫面卡頓**：設定 → 畫質改為「低」（降低解析度、關閉陰影與動態模糊）。手機預設為「中」，網頁版預設為「低」；開局若平均幀率過低會自動降一級
+- **畫面卡頓**：設定 → 畫質改為「低」（降低解析度、關閉陰影與動態模糊）。手機預設為「中」；開局若平均幀率過低會自動降一級
 - **Windows 出現 SmartScreen 警告**：檔案未經程式碼簽署，選「其他資訊 → 仍要執行」
-- **網頁版沒有聲音**：瀏覽器要求先點擊畫面才會播放音訊，點一下即可
-- **存檔位置**：Windows 為 `%APPDATA%\Godot\app_userdata\AbandonedCityFPS\profile.cfg`；網頁版存在瀏覽器本機儲存空間（清除網站資料會一併清除存檔）
+- **存檔位置**：Windows 為 `%APPDATA%\Godot\app_userdata\AbandonedCityFPS\profile.cfg`；Android 存在應用程式私有儲存空間（解除安裝會一併清除存檔）
 - **清除存檔**：設定頁最下方「清除所有存檔資料」
 
 ## 從原始碼執行與匯出
@@ -72,7 +70,6 @@ git clone https://github.com/a201009200979603117-create/abandoned-city-fps.git
 cd abandoned-city-fps
 godot --path .                       # 直接執行
 godot --headless --path . --export-release "Windows Desktop" build/AbandonedCityFPS.exe
-godot --headless --path . --export-release "Web" build/web/index.html
 godot --headless --path . --export-debug   "Android" build/AbandonedCityFPS.apk
 ```
 匯出需先安裝對應的匯出範本；Android 需設定 Java 17 與 Android SDK（`export_presets.cfg` 內已有預設）。
