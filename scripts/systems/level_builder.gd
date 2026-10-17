@@ -49,7 +49,9 @@ var last_yield_ms: int = 0
 func _ready() -> void:
 	# 渲染解析度：低畫質在遊戲中以 1152×648 內部解析度繪製再放大（網頁 / 低階 GPU 的填充率是最大瓶頸）；選單維持清晰
 	var win := get_tree().root
-	if Game.gameplay_boot and Save.effective_quality() == 0:
+	if Game.keep_window_scale:
+		pass
+	elif Game.gameplay_boot and Save.effective_quality() == 0:
 		win.content_scale_mode = Window.CONTENT_SCALE_MODE_VIEWPORT
 	else:
 		win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
@@ -221,6 +223,10 @@ func _setup_weather() -> void:
 	else:
 		kind = WEATHER_SCRIPT.weather_for_level(Game.level)
 		tod = WEATHER_SCRIPT.tod_for_level(Game.level)
+	if Game.force_weather != "":
+		kind = Game.force_weather
+	if Game.force_tod != "":
+		tod = Game.force_tod
 	var w := Node3D.new()
 	w.set_script(WEATHER_SCRIPT)
 	add_child(w)

@@ -13,6 +13,8 @@ const BOT_COUNT: int = 11
 const ZONE_RADII: Array = [110.0, 70.0, 45.0, 26.0, 12.0, 4.0]
 const HOLD_TIME: Array = [35.0, 30.0, 25.0, 20.0, 15.0]
 const SHRINK_TIME: Array = [25.0, 22.0, 20.0, 18.0, 15.0]
+const FINAL_TIMEOUT: float = 45.0   # 最終圈持續超過這個秒數仍沒分出勝負 → 剩餘 AI 受傷害
+const SUDDEN_DPS: float = 15.0
 const ZONE_DPS: Array = [1.5, 2.5, 4.0, 7.0, 11.0]
 const GUN_WEIGHTS: Dictionary = {"pistol": 22.0, "smg": 18.0, "rifle": 18.0, "shotgun": 14.0, "lmg": 8.0, "sniper": 8.0}
 const SHIRTS: Array = [
@@ -27,6 +29,10 @@ var hint_owned: bool = false
 var bots: Array = []
 var started: bool = false
 var victory: bool = false
+var final_time: float = 0.0          # 最終安全區已持續秒數
+var sudden_death: bool = false
+var drop_watch: Dictionary = {}      # AI 跳傘時間（保底用）
+var idle_watch: Dictionary = {}      # AI 原地不動時間（保底用）
 
 # 安全區
 var zone_center: Vector3 = Vector3.ZERO
@@ -571,10 +577,56 @@ func _zone_damage() -> void:
 	if _outside(player) and not player.is_dead:
 		player.take_damage(dps)
 	bots = bots.filter(func(b: Variant) -> bool: return is_instance_valid(b))
+	if zone_finished:
+		final_time += 1.0
 	for b in bots:
-		var bot := b as Node3D
-		if not bool(bot.get("is_dead")) and _outside(bot):
+		var bot := b as CharacterBody3D
+		if bool(bot.get("is_dead")):
+			continue
+		_bot_watchdog(bot)
+		if bool(bot.get("is_dead")):
+			continue
+		if _outside(bot):
 			bot.take_damage(dps, null)
+	# 決賽圈超時保底：AI 若卡在無法抵達的地方，玩家永遠無法結束比賽 → 剩餘 AI 持續受到毒圈侵蝕
+	if zone_finished and final_time >= FINAL_TIMEOUT and not victory:
+		if not sudden_death:
+			sudden_death = true
+			Game.banner.emit("決賽圈超時！剩餘敵人受到毒圈侵蝕")
+		for b in bots:
+			if not bool(b.get("is_dead")):
+				b.take_damage(SUDDEN_DPS, null)
+
+
+# AI 卡住保底：掉出地圖、跳傘卡住、長時間原地不動 → 強制處理，避免存活數永遠扣不掉
+func _bot_watchdog(bot: CharacterBody3D) -> void:
+	var id := bot.get_instance_id()
+	var pos := bot.global_position
+	if pos.y < -10.0 or absf(pos.x) > HALF + 30.0 or absf(pos.z) > HALF + 30.0:
+		bot.set("dropping", false)
+		bot.die()
+		return
+	if bool(bot.get("dropping")):
+		var dt: float = float(drop_watch.get(id, 0.0)) + 1.0
+		drop_watch[id] = dt
+		if dt > 45.0:
+			bot.force_land(ground_point(Vector3(pos.x, 0.0, pos.z), 0.0, 6.0))
+			drop_watch.erase(id)
+		return
+	var rec: Array = idle_watch.get(id, [pos, 0.0])
+	var moved := Vector2(pos.x - (rec[0] as Vector3).x, pos.z - (rec[0] as Vector3).z).length()
+	if moved > 1.5 or float(bot.get("heal_t")) > 0.0:
+		idle_watch[id] = [pos, 0.0]
+		return
+	rec[1] = float(rec[1]) + 1.0
+	idle_watch[id] = rec
+	# 原地不動超過 40 秒：搬到安全區內的空地（不在玩家視線附近時才搬）
+	if float(rec[1]) > 40.0 and pos.distance_to(player.global_position) > 25.0:
+		var np := ground_point(zone_center, 0.0, maxf(zone_radius * 0.8, 2.0))
+		bot.global_position = np
+		bot.velocity = Vector3.ZERO
+		bot.set("has_goal", false)
+		idle_watch[id] = [np, 0.0]
 
 
 # ---------- 淘汰、勝利 ----------

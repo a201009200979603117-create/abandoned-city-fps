@@ -217,9 +217,42 @@ func apply_settings() -> void:
 	AudioServer.set_bus_mute(bus, volume <= 0.001)
 	if DisplayServer.get_name() == "headless":
 		return
-	var mode := DisplayServer.WINDOW_MODE_FULLSCREEN if fullscreen else DisplayServer.WINDOW_MODE_WINDOWED
-	if DisplayServer.window_get_mode() != mode:
+	_apply_window_mode()
+
+
+var _window_busy: bool = false
+
+
+# 切換全螢幕 / 視窗：切換後視窗大小可能與螢幕不符（版面被切掉、右側看不到），所以等視窗穩定後強制校正
+func _apply_window_mode() -> void:
+	if _window_busy:
+		return   # 連點時只處理最後一次的設定值
+	_window_busy = true
+	var want_full := fullscreen
+	while true:
+		var mode := DisplayServer.WINDOW_MODE_FULLSCREEN if want_full else DisplayServer.WINDOW_MODE_WINDOWED
+		if DisplayServer.window_get_mode() == mode:
+			break   # 已是目標模式（例如拖音量條時反覆呼叫）：不動視窗
 		DisplayServer.window_set_mode(mode)
+		for i in 3:
+			await get_tree().process_frame
+		var scr := DisplayServer.window_get_current_screen()
+		var ssize := DisplayServer.screen_get_size(scr)
+		var spos := DisplayServer.screen_get_position(scr)
+		if want_full:
+			if DisplayServer.window_get_size() != ssize or DisplayServer.window_get_position() != spos:
+				DisplayServer.window_set_size(ssize)
+				DisplayServer.window_set_position(spos)
+		else:
+			# 視窗模式：大小不得超過螢幕可用範圍（保留標題列與工作列空間），並置中
+			var target := Vector2i(mini(1152, ssize.x - 80), mini(648, ssize.y - 140))
+			target = Vector2i(maxi(target.x, 640), maxi(target.y, 360))
+			DisplayServer.window_set_size(target)
+			DisplayServer.window_set_position(spos + (ssize - target) / 2)
+		if want_full == fullscreen:
+			break
+		want_full = fullscreen
+	_window_busy = false
 
 
 func add_coins(n: int) -> void:

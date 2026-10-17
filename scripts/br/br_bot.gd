@@ -208,8 +208,8 @@ func weapon_value(id: String) -> float:
 func take_damage(damage: float, source: Node = null) -> void:
 	if is_dead:
 		return
-	if dropping:
-		return
+	if dropping and source != null:
+		return   # 跳傘中不受玩家 / AI 攻擊；環境傷害（source 為空）仍有效，避免卡住的 AI 無敵
 	var remaining := damage * (1.0 - armor)
 	if shield > 0.0:
 		var absorbed := minf(shield, remaining)
@@ -290,6 +290,16 @@ func start_drop(height: float) -> void:
 		line.position = Vector3(cos(a) * 0.7, 1.7, sin(a) * 0.7)
 		line.rotation = Vector3(-sin(a) * 0.4, 0.0, cos(a) * 0.4)
 		canopy.add_child(line)
+
+
+# 保底：強制結束跳傘並放到指定地面位置（跳傘卡住時由管理器呼叫）
+func force_land(pos: Vector3) -> void:
+	dropping = false
+	if canopy != null:
+		canopy.queue_free()
+		canopy = null
+	velocity = Vector3.ZERO
+	global_position = pos
 
 
 func _drop_physics(delta: float) -> void:
