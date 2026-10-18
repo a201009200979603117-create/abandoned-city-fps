@@ -344,6 +344,9 @@ func _drag(idx: int, pos: Vector2, rel: Vector2) -> void:
 		_apply_move(v.limit_length(1.0))
 	elif idx == look_finger and player != null:
 		player.apply_look(rel * LOOK_SCALE)
+	elif player != null and str(finger_button.get(idx, "")) in ["fire", "fire2"]:
+		# 射擊鍵可拖曳：按住射擊的同時滑動手指就能轉動視角（同 Free Fire）
+		player.apply_look(rel * LOOK_SCALE)
 
 
 # ---------- 繪製 ----------

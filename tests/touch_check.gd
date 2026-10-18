@@ -85,6 +85,24 @@ func _init() -> void:
 	await create_timer(0.4).timeout
 	_touch(3, _btn("fire2"), false)
 	print("fired: ", weapon.current_ammo < ammo0 or not weapon.armed, " ammo ", ammo0, "->", weapon.current_ammo)
+	# 射擊鍵拖曳轉視角（按住射擊同時滑動）
+	var yaw1: float = player.rotation.y
+	var ammo1: int = weapon.current_ammo
+	_touch(7, _btn("fire"), true)
+	_drag(7, _btn("fire") + Vector2(-90, 0), Vector2(-90, 0))
+	await create_timer(0.3).timeout
+	_touch(7, _btn("fire") + Vector2(-90, 0), false)
+	print("fire-drag look changed: ", absf(player.rotation.y - yaw1) > 0.01, " fired: ", weapon.current_ammo < ammo1 or not weapon.armed)
+	# 奔跑中射擊
+	_touch(0, start, true)
+	_drag(0, start + Vector2(0, -200), Vector2(0, -200))
+	await create_timer(0.8).timeout
+	var ammo2: int = weapon.current_ammo
+	_touch(8, _btn("fire"), true)
+	await create_timer(0.5).timeout
+	print("sprinting=", player.is_sprinting, " fired while sprinting: ", weapon.current_ammo < ammo2 or not weapon.armed)
+	_touch(8, _btn("fire"), false)
+	_touch(0, start + Vector2(0, -200), false)
 	# 跳躍 / 蹲下 / 開鏡 / 換彈 / 拾取
 	for id in ["jump", "crouch", "aim", "reload", "interact", "crouch", "aim"]:
 		_touch(4, _btn(id), true)

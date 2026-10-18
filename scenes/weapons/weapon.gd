@@ -310,7 +310,7 @@ func _process(delta: float) -> void:
 		down = Input.is_key_pressed(KEY_F) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 	var want_fire := down if automatic else (down and not trigger_was_down)
 	trigger_was_down = down
-	if want_fire and fire_timer <= 0.0 and reload_left <= 0.0 and sprint_pose < 0.5:
+	if want_fire and fire_timer <= 0.0 and reload_left <= 0.0:   # 奔跑中也可射擊
 		shoot()
 
 
@@ -341,7 +341,7 @@ func _update_pose(delta: float) -> void:
 	sway = sway.lerp(Vector2(clampf(-d_yaw * 1.6, -0.06, 0.06), clampf(-d_pitch * 1.6, -0.05, 0.05)), minf(delta * 10.0, 1.0))
 
 	var moving := Vector2(player.velocity.x, player.velocity.z).length()
-	var sprint_target := 1.0 if (armed and bool(player.get("is_sprinting")) and moving > 1.0) else 0.0
+	var sprint_target := 1.0 if (armed and bool(player.get("is_sprinting")) and moving > 1.0 and not trigger_was_down) else 0.0   # 扣著扳機時舉槍（奔跑中也能射擊）
 	sprint_pose = move_toward(sprint_pose, sprint_target, delta * 6.0)
 
 	var bob_t: float = float(player.get("bob_time"))
