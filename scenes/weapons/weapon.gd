@@ -321,7 +321,9 @@ func _ads_held() -> bool:
 
 
 func _update_zoom(delta: float) -> void:
-	var want := armed and reload_left <= 0.0 and not bool(player.get("is_sprinting")) and _ads_held()
+	# 奔跑中按開鏡：自動停止奔跑、切成走路並開鏡（玩家端以 ads_wanted 取消奔跑）
+	var want := armed and reload_left <= 0.0 and _ads_held()
+	player.set("ads_wanted", want)
 	ads = move_toward(ads, 1.0 if want else 0.0, delta * (6.0 if zoom_fov > 0.0 else 8.0) * (1.0 + 0.1 * float(scope_lv)))
 	player.set("ads_factor", ads)
 	var ads_fov := zoom_fov if zoom_fov > 0.0 else Save.fov * (0.82 - 0.04 * float(scope_lv))

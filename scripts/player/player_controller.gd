@@ -24,6 +24,7 @@ var shake: float = 0.0
 var sway_roll: float = 0.0
 var ads_factor: float = 0.0   # 0=腰射 1=完全瞄準（由武器更新）
 var is_sprinting: bool = false
+var ads_wanted: bool = false   # 玩家正在按開鏡（由武器設定）；開鏡時不能奔跑
 var step_timer: float = 0.0
 var bob_time: float = 0.0
 var crouching: bool = false
@@ -136,7 +137,7 @@ func _physics_process(delta: float) -> void:
 
 	_update_crouch(delta)
 	var speed := move_speed
-	var sprinting := Input.is_action_pressed("sprint") and input_dir.y < 0.0 and not crouching and ads_factor < 0.3
+	var sprinting := Input.is_action_pressed("sprint") and input_dir.y < 0.0 and not crouching and not ads_wanted and ads_factor < 0.3
 	is_sprinting = sprinting
 	if sprinting:
 		speed *= sprint_multiplier

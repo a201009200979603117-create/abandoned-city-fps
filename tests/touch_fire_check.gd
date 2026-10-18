@@ -63,6 +63,13 @@ func _init() -> void:
 	await create_timer(0.5).timeout
 	_touch(2, _btn("fire"), false)
 	print("RESULT sprint-fire: sprinting=", player.is_sprinting, " fired=", weapon.current_ammo < ammo1, " (", ammo1, "->", weapon.current_ammo, ")")
+	# 3) 奔跑中按開鏡：應停止奔跑並進入開鏡
+	weapon.touch_zoom = true
+	await create_timer(0.6).timeout
+	print("RESULT sprint-then-ads: sprinting=", player.is_sprinting, " ads_factor=", snappedf(player.ads_factor, 0.01))
+	weapon.touch_zoom = false
+	await create_timer(0.6).timeout
+	print("RESULT ads-off: sprinting=", player.is_sprinting, " ads_factor=", snappedf(player.ads_factor, 0.01))
 	Input.action_release("move_forward")
 	Input.action_release("sprint")
 	quit()
