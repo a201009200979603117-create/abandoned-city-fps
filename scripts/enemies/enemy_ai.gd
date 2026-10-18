@@ -60,6 +60,9 @@ var strafe_dir: float = 1.0
 var ring: MeshInstance3D = null
 var stuck_pos: Vector3 = Vector3.ZERO
 var stuck_count: int = 0
+var lost_t: float = 0.0
+var lost_acc: float = 0.0
+var lost_pos: Vector3 = Vector3.ZERO
 
 # 狀態效果（技能使用）
 var slow_mult: float = 1.0
@@ -479,7 +482,8 @@ func _spitter_update(delta: float, to_player: Vector3, distance: float) -> bool:
 		spit_cd = randf_range(2.4, 3.4)
 		Sfx.play("screech", -8.0, 1.6)
 		return true
-	if distance <= 15.0:
+	if distance <= 15.0 and (player == null or _has_los(player.global_position)):
+		# 有視線才橫移走位；被牆 / 車擋住時改為接近（否則會躲在掩體後永遠原地打轉，玩家找不到）
 		var side := to_player.normalized().cross(Vector3.UP) * strafe_dir
 		velocity.x = side.x * move_speed * 0.5
 		velocity.z = side.z * move_speed * 0.5
@@ -665,6 +669,8 @@ func _physics_process(delta: float) -> void:
 	if visual != null:
 		visual.visible = d2 < 8100.0
 
+	_lost_watchdog(delta, frozen)
+
 	# 卡死偵測：想移動卻 2 秒內幾乎沒位移 → 先繞行，再失敗就重新傳送到開闊處
 	if want_move:
 		stuck_check_t += delta
@@ -690,6 +696,33 @@ func _physics_process(delta: float) -> void:
 	if is_on_wall() and side_timer <= 0.0:
 		side_timer = 0.8
 		side_dir = 1.0 if randf() < 0.5 else -1.0
+
+
+# 保底：敵人離玩家很遠、卻長時間沒位移（卡在掩體後 / 角落 / 走位邏輯卡住）→ 重新傳送到玩家附近，避免波次永遠清不完
+func _lost_watchdog(delta: float, frozen: bool) -> void:
+	if frozen or player == null or not is_instance_valid(player) or bool(player.get("is_dead")):
+		lost_t = 0.0
+		return
+	var far := global_position.distance_to(player.global_position) > attack_range + 6.0
+	if enemy_type == Type.BOSS or not far:
+		lost_t = 0.0
+		lost_pos = global_position
+		return
+	lost_acc += delta
+	if lost_acc < 2.0:
+		return
+	lost_acc = 0.0
+	if global_position.distance_to(lost_pos) < 1.2:
+		lost_t += 2.0
+	else:
+		lost_t = 0.0
+	lost_pos = global_position
+	if lost_t >= 8.0:
+		lost_t = 0.0
+		var sp := get_tree().get_first_node_in_group("enemy_spawner")
+		if sp != null and sp.has_method("relocate"):
+			global_position = sp.relocate()
+			velocity = Vector3.ZERO
 
 
 func take_damage(damage: float) -> void:

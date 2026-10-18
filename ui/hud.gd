@@ -246,11 +246,32 @@ func _process(delta: float) -> void:
 喪屍幣 +%d" % [Game.kills, Game.run_coins]
 	else:
 		wave_label.text = "第 %d 關　第 %d / %d 波" % [Game.level, maxi(Game.wave, 1), Game.total_waves]
-		enemy_label.text = "剩餘敵人：%d" % Game.enemies_remaining
+		enemy_label.text = "剩餘敵人：%d%s" % [Game.enemies_remaining, _last_enemies_hint()]
 		score_label.text = "分數：%d
 擊殺：%d
 喪屍幣 +%d" % [Game.score, Game.kills, Game.run_coins]
 		_update_skill_bar()
+
+
+# 殭屍關卡尾聲（剩 1~2 隻）：標示最近敵人的方位與距離，找不到時有線索
+func _last_enemies_hint() -> String:
+	if Game.enemies_remaining > 2 or player == null or not is_instance_valid(player):
+		return ""
+	var best: Node3D = null
+	var best_d := INF
+	for e in get_tree().get_nodes_in_group("enemies"):
+		var d := (e as Node3D).global_position.distance_to((player as Node3D).global_position)
+		if d < best_d:
+			best_d = d
+			best = e as Node3D
+	if best == null:
+		return ""
+	var to := best.global_position - (player as Node3D).global_position
+	var fwd := -(player as Node3D).global_transform.basis.z
+	var ang := rad_to_deg(atan2(to.z * fwd.x - to.x * fwd.z, to.x * fwd.x + to.z * fwd.z))   # 正值=右側（俯視）
+	var names := ["前方", "右前", "右側", "右後", "後方", "左後", "左側", "左前"]
+	var idx := int(round(fposmod(ang, 360.0) / 45.0)) % 8
+	return "（最近：%s %d 公尺）" % [names[idx], int(best_d)]
 
 
 # ---------- 建立介面 ----------
