@@ -276,7 +276,7 @@ func _page_frame(title: String, scrollable: bool = true) -> VBoxContainer:
 		# 內容超過視窗高度時可捲動
 		var scroll := ScrollContainer.new()
 		scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO   # 保底：內容真的太寬時可橫向捲動而不是被切掉
 		root.add_child(scroll)
 		content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		scroll.add_child(content)
@@ -888,14 +888,14 @@ func _slider_row(parent: Control, text: String, min_v: float, max_v: float, step
 	row.add_theme_constant_override("separation", 16)
 	parent.add_child(row)
 	var l := _label(text, 22)
-	l.custom_minimum_size = Vector2(190, 0)
+	l.custom_minimum_size = Vector2(150, 0)
 	row.add_child(l)
 	var s := HSlider.new()
 	s.min_value = min_v
 	s.max_value = max_v
 	s.step = step
 	s.value = value
-	s.custom_minimum_size = Vector2(260 if mobile else 400, 48 if mobile else 30)
+	s.custom_minimum_size = Vector2(260 if mobile else 200, 48 if mobile else 30)
 	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_style_slider(s, ACCENT)
@@ -1074,7 +1074,7 @@ func _page_settings() -> void:
 	# 右欄：操作說明
 	var right := VBoxContainer.new()
 	right.add_theme_constant_override("separation", 16)
-	right.custom_minimum_size = Vector2(380 if mobile else 430, 0)
+	right.custom_minimum_size = Vector2(380 if mobile else 340, 0)
 	cols.add_child(right)
 	var help := _section(right, "操作說明", Color(0.82, 0.68, 0.34))
 	if mobile:
@@ -1094,7 +1094,7 @@ func _page_settings() -> void:
 			help.add_child(tl)
 	else:
 		var grid := GridContainer.new()
-		grid.columns = 2
+		grid.columns = 1   # 單欄：1152 寬的版面放兩欄會超出畫面右側
 		grid.add_theme_constant_override("h_separation", 22)
 		grid.add_theme_constant_override("v_separation", 9)
 		help.add_child(grid)
